@@ -1,0 +1,17 @@
+[
+  {
+    "name": "fio",
+    "url": "https://github.com/axboe/fio/archive/refs/tags/fio-3.39.tar.gz",
+    "sha256": "e2f4ff137061b44ceb83a55eb9ca8856fe188db6d9b00cb59f8629c9162afe0a"
+  },
+  {
+    "name": "stress-ng",
+    "url": "https://github.com/ColinIanKing/stress-ng/archive/refs/tags/V0.18.10.tar.gz",
+    "sha256": "bb729844b5a3c8953e58ddb705dce8a62078ad75f0b6f49092f8027d9c699700"
+  },
+  {
+    "name": "iperf3",
+    "url": "https://github.com/esnet/iperf/archive/refs/tags/3.17.1.tar.gz",
+    "sha256": "105b4fe7fbce31c9b94a3fec10c46e3b4b298adc076e1e3af52b990e1faf2db9"
+  }
+]

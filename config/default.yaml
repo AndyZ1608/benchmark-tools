@@ -1,0 +1,12 @@
+preset: standard
+workers: 1
+duration: 10
+warmup: 2
+repetitions: 3
+size: 256MiB
+file-size: 1GiB
+profile: randread-4k
+ioengine: io_uring
+iodepth: 32
+numjobs: 1
+output: results

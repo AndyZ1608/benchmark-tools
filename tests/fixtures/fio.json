@@ -1,0 +1,1 @@
+{"jobs":[{"error":0,"read":{"iops":70,"bw_bytes":286720,"runtime":1000,"clat_ns":{"mean":10000,"percentile":{"95.000000":15000,"99.000000":20000},"bins":{"10000":70}}},"write":{"iops":30,"bw_bytes":122880,"runtime":1000,"clat_ns":{"mean":20000,"percentile":{"95.000000":30000,"99.000000":40000},"bins":{"20000":30}}},"iodepth_level":{"32":99.9}}]}
