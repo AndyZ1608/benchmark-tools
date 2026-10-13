@@ -2,3 +2,10 @@
 results/
 dist/
 *.exe
+.vmbench/
+.build/
+vendor-engines/
+/vmbench
+/engines/
+__pycache__/
+*.pyc

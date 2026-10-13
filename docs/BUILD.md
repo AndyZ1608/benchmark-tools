@@ -17,3 +17,7 @@ These third-party build scripts have not been executed on Linux here. fio requir
 The packaging gate rejects dynamically linked engines. The native kernel can alternatively be cross-built with Zig 0.13.0: `zig cc -target x86_64-linux-musl -O2 -fno-fast-math -pthread -static native/compute-bench.c -o dist/vmbench/engines/compute-bench`. This cross-compilation was executed successfully on Windows. The Go Linux executable was also cross-compiled. Neither Linux executable was run on this host.
 
 Run the entire package on Ubuntu 22.04 and 24.04 x86_64 with networking disabled except loopback smoke tests. ELF validation does not establish kernel compatibility. A complete release archive is created only after all engine prerequisites are present and runnable. Current artifacts are development binaries/source, not a qualified offline release.
+
+## Automated host setup
+
+For Ubuntu source development, use `./start.sh` (or `./init.sh --yes` for explicitly authorized noninteractive apt installation). See [BOOTSTRAP.md](BOOTSTRAP.md). The bootstrap defaults to host-linked system engines; this differs from the static release process above. `./init.sh --engine-mode bundled` reuses these source-build scripts and enforces static binaries. Release archives now include init.sh/start.sh and the runtime bootstrap helper, so offline prebuilt validation needs no compiler.

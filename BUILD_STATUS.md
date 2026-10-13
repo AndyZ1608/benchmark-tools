@@ -24,3 +24,7 @@ Not executed:
 The development archive includes source, cached pinned upstream source archives, the Linux Go executable and static native kernel. It deliberately lacks fio, stress-ng and iperf3 executables. It cannot execute disk/network/CPU stress until those are built and installed beside the CLI. Packaging scripts reject a complete release when required engine binaries are missing. No complete vmbench-linux-amd64.tar.gz release has been produced.
 
 See README.md for unfinished advanced features and docs/BUILD.md for Linux qualification commands. No fabricated benchmark results or test success are included.
+
+## Automatic startup implementation
+
+init.sh/start.sh now implement online/offline initialization, approved missing-package installation, project-local pinned Go selection, incremental builds, engine/runtime validation and checksummed state. Go source builds use go 1.23.0 with toolchain go1.23.12. See docs/BOOTSTRAP_VALIDATION.md for executed checks and Ubuntu-specific work not executed here. Benchmark acceptance and standalone-release limitations above remain unchanged.

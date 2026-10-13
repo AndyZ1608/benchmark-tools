@@ -1,6 +1,47 @@
 # VMBench
 An offline-first Linux CLI implementation under development. **This is not a qualified v1.0 offline release.**
 
+## Quick Start
+
+Supported source-install targets: **Ubuntu 22.04 or 24.04, x86_64**.
+
+```bash
+git clone https://github.com/AndyZ1608/benchmark-tools.git
+cd benchmark-tools
+chmod +x init.sh start.sh
+./start.sh
+```
+
+The first launch initializes the project, then opens the existing CLI. By default this is an **online development installation**: missing GCC/build-essential and fio/stress-ng/iperf3 packages are listed before apt installation, and require an interactive confirmation. The installer never performs a system upgrade. Use `./start.sh --yes` to explicitly authorize noninteractive installation of the listed missing packages. No benchmarks or background servers are started during initialization.
+
+If necessary, initialization downloads checksum-pinned Go 1.23.12 into `.vmbench/toolchains/`; it never overwrites system Go or changes `go env -w` settings. Compatible newer installations are reused. All build/test invocations use the selected local toolchain with automatic Go switching disabled.
+
+Subsequent launches verify source/binary hashes, engine identities, shared libraries and version commands, then launch without rebuilding, downloading or installing packages. CLI source changes rebuild the CLI; native source changes rebuild only the native kernel. `./init.sh` reruns validation and reuses unchanged components.
+
+```bash
+./start.sh cpu test --preset quick
+./start.sh cpu stress --workers 8 --duration 300
+./start.sh ram test --threads 2 --size 1GiB
+./start.sh disk test --path /data --profile randread-4k
+./start.sh system info
+./vmbench cpu test --preset quick
+
+./init.sh --offline                 # local tools and files only
+./start.sh --offline --help         # startup options precede CLI arguments
+./start.sh --offline --reinit --help # force source builds where source exists
+./init.sh --yes                     # authorize missing apt packages
+```
+
+`--reinit` forces source rebuilding; prebuilt-only releases are revalidated. `--offline`, `--yes`, `--engine-mode system|bundled`, and `--reinit` are startup options consumed only before the first CLI argument. Use `--` to end that prefix. All remaining arguments are forwarded exactly using `exec`; application exit codes and signals are preserved. Scripts resolve the repository from their own location and also work from other directories or paths containing spaces. Relative benchmark/output paths retain the caller's working-directory meaning.
+
+Offline mode never uses apt, Git network operations, remote source fetching, package registries, or automatic Go toolchain downloads. A complete prebuilt release needs no Go, GCC, Python or binutils to initialize: only the standard Ubuntu runtime/base utilities and its verified engines. An offline source build needs a compatible local Go and GCC. Missing dependencies produce an error and leave no successful new state.
+
+Default engine mode is `system`: existing compatible local engines or installed system engines are copied beside the CLI and their runtime dependencies checked using `ldd`. **These host-linked binaries are not automatically portable.** `./init.sh --engine-mode bundled` reuses `vendor-engines/` or calls the existing pinned source-fetch/build scripts and requires static executables. It needs the Linux build dependencies documented in [docs/BUILD.md](docs/BUILD.md); offline bundled source builds require cached archives. Static validation alone does not qualify an Ubuntu standalone release.
+
+Installation state is stored in `.vmbench/install-state.json` with checksummed binary/source manifests, engine versions, linkage and toolchain metadata. State is written only after all checks pass; it is never executed as shell code. Failures and SIGINT/SIGTERM clean up this attempt's staging directory. A stale `.vmbench/init.lock` after an uncatchable interruption must be removed only after confirming no initializer is active. `--reinit` provides explicit rebuilding for restored binaries whose source provenance is unknown.
+
+See [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) for toolchain diagnostics, troubleshooting and validation details. The bootstrap does not change the existing benchmark methods or remedy the benchmark qualification limitations below.
+
 ## Use
 Build the CLI: `go build ./cmd/vmbench`. Linux native kernel: `cc -O2 -fno-fast-math -pthread native/compute-bench.c -o engines/compute-bench` beside the CLI. Supply fio, stress-ng and iperf3 under the same engines directory; runtime never downloads anything.
 

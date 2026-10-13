@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+cd "$ROOT"
+source "$ROOT/scripts/bootstrap-common.sh"
 mkdir -p dist/vmbench/engines dist/vmbench/config dist/vmbench/LICENSES
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/vmbench/vmbench ./cmd/vmbench
-cc -O2 -fno-fast-math -pthread -static native/compute-bench.c -lm -o dist/vmbench/engines/compute-bench
+GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/vmbench/vmbench ./cmd/vmbench
+compile_native_kernel "$ROOT/dist/vmbench/engines/compute-bench" static cc
 cp config/default.yaml dist/vmbench/config/
-cp README.md VERSION LICENSE dist/vmbench/
+cp README.md VERSION LICENSE init.sh start.sh dist/vmbench/
+mkdir -p dist/vmbench/scripts dist/vmbench/docs
+cp docs/BUILD.md docs/BOOTSTRAP.md dist/vmbench/docs/
+cp scripts/bootstrap-common.sh scripts/go-toolchain.lock dist/vmbench/scripts/
+chmod +x dist/vmbench/init.sh dist/vmbench/start.sh
 # Third-party static binaries must be built from the pinned sources recorded below.
 for engine in fio stress-ng iperf3; do
   test -x "vendor-engines/$engine" || { echo "Missing vendor-engines/$engine; see docs/BUILD.md" >&2; exit 1; }
