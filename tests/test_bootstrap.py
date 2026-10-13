@@ -39,7 +39,7 @@ while (($#)); do if [[ $1 == -o ]]; then cp "$FIXTURE_TEMPLATES/compute-bench" "
         for name,version in [('vmbench','VMBench 1.0.0-dev'),('compute-bench','compute-bench-v1'),('fio','fio-3.39'),('stress-ng','stress-ng 0.18.10'),('iperf3','iperf 3.17.1')]:
             content=f'''# bootstrap-test-executable
 case "${{1:-}}" in
---version) echo '{version}';;
+--version|-v) echo '{version}';;
 --enghelp) echo ' io_uring libaio';;
 --help|version) echo '{version}';;
 *) printf '%s\\0' "$@" > "$FIXTURE_ARGS"; exit "${{FIXTURE_CLI_EXIT:-0}}";;
@@ -77,6 +77,19 @@ test) echo "go-test {version} ${{GOPROXY:-default}}" >> "$FIXTURE_LOG";;
         self.first();state=json.loads((self.root/'.vmbench/install-state.json').read_text());self.assertEqual(state['status'],'validated');self.assertIn('cli-build',self.calls());self.assertIn('native-build',self.calls());self.assertIn('go-test go1.23.12 off',self.calls());self.assertNotIn('network-or-install',self.calls())
     def test_second_launch_and_argument_forwarding(self):
         self.first();before=self.calls();self.run_script(args=['cpu','test','--path','a path with spaces','$(touch unsafe)']);self.assertEqual(self.calls(),before);self.assertEqual((self.base/'args').read_bytes().split(b'\0')[:-1],[b'cpu',b'test',b'--path',b'a path with spaces',b'$(touch unsafe)'])
+    def test_version_flags_work_through_startup_and_init_reuses(self):
+        self.run_script(args=['--offline','--version']);before=self.calls()
+        for argument in ['--version','-v','version']:
+            result=self.run_script(args=[argument]);self.assertIn('VMBench 1.0.0-dev',result.stdout)
+        self.run_script('init.sh',['--offline']);self.assertEqual(self.calls(),before)
+    def test_legacy_cli_rebuilds_without_rebuilding_valid_engines(self):
+        self.prebuilts();self.write(self.root/'vmbench','if [[ $1 == version ]]; then echo "VMBench 1.0.0-dev"; else echo "ERROR: expected component and action; use --help" >&2; exit 1; fi\n')
+        self.run_script('init.sh',['--offline']);self.assertIn('cli-build',self.calls());self.assertNotIn('native-build',self.calls());self.assertNotIn('network-or-install',self.calls());before=self.calls();self.run_script('init.sh',['--offline']);self.assertEqual(self.calls(),before)
+    def test_cli_version_failure_does_not_commit_state(self):
+        self.write(self.templates/'vmbench','echo "ERROR: expected component and action; use --help" >&2; exit 1\n')
+        result=self.run_script('init.sh',['--offline'],ok=False);self.assertIn('vmbench --version failed',result.stderr);self.assertFalse((self.root/'.vmbench/install-state.json').exists());self.assertFalse((self.root/'.vmbench/install-state.sha256').exists())
+    def test_version_source_change_rebuilds_only_cli(self):
+        self.first();before=self.calls();(self.root/'VERSION').write_text('1.0.1-test\n');self.run_script(args=['--offline','--version']);delta=self.calls()[len(before):];self.assertIn('cli-build',delta);self.assertNotIn('native-build',delta)
     def test_go_122_offline_rejected(self):
         self.install_go('go1.22.2');r=self.run_script('init.sh',['--offline'],ok=False);self.assertIn('Offline initialization needs local Go',r.stderr);self.assertNotIn('network-or-install',self.calls());self.assertFalse((self.root/'.vmbench/install-state.json').exists())
     def test_go_122_uses_local_123(self):

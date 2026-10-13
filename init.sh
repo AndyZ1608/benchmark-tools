@@ -144,7 +144,7 @@ go_local() {
     else env GOTOOLCHAIN=local "$GO_BIN" "$@"; fi
 }
 build_vmbench() {
-    if (( BUILD_CLI )); then log BUILD 'VMBench CLI'; (cd "$ROOT"; CGO_ENABLED=0 go_local build -trimpath -o "$STAGE/vmbench" ./cmd/vmbench); log OK 'CLI build completed'
+    if (( BUILD_CLI )); then log BUILD 'VMBench CLI'; local version_flags; version_flags=$(build_version_ldflags); (cd "$ROOT"; CGO_ENABLED=0 go_local build -trimpath -ldflags "$version_flags" -o "$STAGE/vmbench" ./cmd/vmbench); log OK 'CLI build completed'
     else cp "$ROOT/vmbench" "$STAGE/vmbench"; log OK 'CLI unchanged; reusing executable'; fi
 }
 build_native_engine() {
@@ -184,7 +184,7 @@ run_smoke_tests() {
     # These checks never start benchmark workloads or an iperf server.
     log CHECK 'CLI help/version and engine version/capability checks'
     timeout 10 "$STAGE/vmbench" --help >/dev/null
-    timeout 10 "$STAGE/vmbench" version >/dev/null
+    timeout 10 "$STAGE/vmbench" --version >/dev/null
     if (( BUILD_CLI )); then log CHECK "Go unit tests using $GO_SELECTED"; (cd "$ROOT"; go_local test ./...); fi
 }
 save_installation_state() {

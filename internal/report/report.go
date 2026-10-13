@@ -9,6 +9,7 @@ import (
 	"time"
 	"vmbench/internal/config"
 	"vmbench/internal/system"
+	"vmbench/internal/version"
 )
 
 type Report struct {
@@ -24,7 +25,7 @@ type Report struct {
 func New(command string, c config.Config) Report {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	return Report{ID: hex.EncodeToString(b), Version: "1.0.0-dev", Command: command, Status: "running", Started: time.Now().UTC(), Settings: c, System: system.Detect(), Results: map[string]any{}, Warnings: []string{}, Errors: []string{}}
+	return Report{ID: hex.EncodeToString(b), Version: version.Current(), Command: command, Status: "running", Started: time.Now().UTC(), Settings: c, System: system.Detect(), Results: map[string]any{}, Warnings: []string{}, Errors: []string{}}
 }
 func (r *Report) Save() (string, error) {
 	if e := os.MkdirAll(r.Settings.Output, 0755); e != nil {

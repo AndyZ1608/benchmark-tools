@@ -21,12 +21,14 @@ import (
 	"vmbench/internal/report"
 	"vmbench/internal/runner"
 	"vmbench/internal/system"
+	"vmbench/internal/version"
 )
 
-const help = `VMBench 1.0.0-dev — offline Linux VM benchmarking
+const helpBody = ` — offline Linux VM benchmarking
 Commands: cpu test | cpu stress | ram test | ram stress | disk test
           network server | network test | full test | system info | version
-Flags: --preset quick|standard|precision --config FILE --non-interactive
+Flags: --version|-v | --help
+       --preset quick|standard|precision --config FILE --non-interactive
        --workers N --duration SECONDS --warmup SECONDS --repetitions N
        --size 256MiB --path DIRECTORY --file-size 1GiB --confirm-writes
        --profile randread-4k|randwrite-4k|mixed-70-30|seqread-1m|seqwrite-1m|latency|qd-scaling
@@ -34,6 +36,8 @@ Flags: --preset quick|standard|precision --config FILE --non-interactive
        --bind IP --port N --streams N --udp --bitrate 100M --reverse --bidir
        --output results
 `
+
+func helpText() string { return "VMBench " + version.Current() + helpBody }
 
 func main() {
 	if e := run(); e != nil {
@@ -44,16 +48,16 @@ func main() {
 func run() error {
 	a := os.Args[1:]
 	if len(a) == 0 {
-		fmt.Print(help, "\nSelect command (e.g. cpu test): ")
+		fmt.Print(helpText(), "\nSelect command (e.g. cpu test): ")
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		a = strings.Fields(line)
 	}
 	if len(a) == 1 && (a[0] == "--help" || a[0] == "help") {
-		fmt.Print(help)
+		fmt.Print(helpText())
 		return nil
 	}
-	if len(a) == 1 && a[0] == "version" {
-		fmt.Println("VMBench 1.0.0-dev; kernel v1; native flags -O2 -fno-fast-math -pthread")
+	if len(a) == 1 && (a[0] == "version" || a[0] == "--version" || a[0] == "-v") {
+		fmt.Printf("VMBench %s; kernel v1; native flags -O2 -fno-fast-math -pthread\n", version.Current())
 		return nil
 	}
 	if len(a) < 2 {

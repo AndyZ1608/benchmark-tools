@@ -18,6 +18,7 @@ if [[ -n $requested_mode ]]; then
     [[ $requested_mode == system || $requested_mode == bundled ]] || { fail '--engine-mode expects system or bundled'; exit 1; }
     if [[ ! -f $ROOT/.vmbench/install-state.json ]] || ! grep -q "\"engine_mode\": \"$requested_mode\"" "$ROOT/.vmbench/install-state.json"; then mode_change=1; fi
 fi
+# installation_ready verifies the same supported --version interface as init.sh.
 if (( reinit || mode_change )) || ! installation_ready; then
     log INFO 'Installation missing, changed, or invalid; initializing VMBench...'
     bash "$ROOT/init.sh" "${init_args[@]}"

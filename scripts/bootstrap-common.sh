@@ -15,7 +15,7 @@ fingerprint() {
     (
         cd "$ROOT"
         case "$scope" in
-            cli) for item in cmd internal; do [[ ! -d $item ]] || find "$item" -type f -name '*.go' -print0; done; [[ ! -f go.mod ]] || printf '%s\0' go.mod; [[ ! -f go.sum ]] || printf '%s\0' go.sum ;;
+            cli) for item in cmd internal; do [[ ! -d $item ]] || find "$item" -type f -name '*.go' -print0; done; [[ ! -f go.mod ]] || printf '%s\0' go.mod; [[ ! -f go.sum ]] || printf '%s\0' go.sum; [[ ! -f VERSION ]] || printf '%s\0' VERSION ;;
             native) [[ ! -d native ]] || find native -type f -print0 ;;
             all) for item in cmd internal native scripts config; do [[ ! -d $item ]] || find "$item" -type f ! -path '*/__pycache__/*' -print0; done
                  for item in go.mod go.sum VERSION init.sh start.sh; do [[ ! -f $item ]] || printf '%s\0' "$item"; done ;;
@@ -68,4 +68,13 @@ compile_native_kernel() {
     local output=$1 linkage=$2 compiler=$3 flags=()
     [[ $linkage != static ]] || flags=(-static)
     "$compiler" -O2 -fno-fast-math -pthread "${flags[@]}" "$ROOT/native/compute-bench.c" -lm -o "$output"
+}
+
+# VERSION is validated as data, then passed as a single linker argument (never evaluated).
+build_version_ldflags() {
+    [[ -f $ROOT/VERSION ]] || return 0
+    local value
+    value=$(tr -d '\r' < "$ROOT/VERSION")
+    [[ $value =~ ^[[:alnum:]][[:alnum:].+_-]*$ ]] || { fail 'VERSION must contain one nonempty version token (letters, digits, dot, plus, underscore, hyphen).'; return 1; }
+    printf '%s' "-X vmbench/internal/version.Value=$value"
 }

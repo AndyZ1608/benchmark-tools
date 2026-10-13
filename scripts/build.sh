@@ -4,7 +4,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 source "$ROOT/scripts/bootstrap-common.sh"
 mkdir -p dist/vmbench/engines dist/vmbench/config dist/vmbench/LICENSES
-GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/vmbench/vmbench ./cmd/vmbench
+version_flags=$(build_version_ldflags)
+GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$version_flags" -o dist/vmbench/vmbench ./cmd/vmbench
 compile_native_kernel "$ROOT/dist/vmbench/engines/compute-bench" static cc
 cp config/default.yaml dist/vmbench/config/
 cp README.md VERSION LICENSE init.sh start.sh dist/vmbench/
