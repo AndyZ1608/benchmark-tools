@@ -10,7 +10,7 @@ compile_native_kernel "$ROOT/dist/vmbench/engines/compute-bench" static cc
 cp config/default.yaml dist/vmbench/config/
 cp README.md VERSION LICENSE init.sh start.sh dist/vmbench/
 mkdir -p dist/vmbench/scripts dist/vmbench/docs
-cp docs/BUILD.md docs/BOOTSTRAP.md docs/PRESENTATION.md docs/RESULT_EXAMPLES.md dist/vmbench/docs/
+cp docs/BUILD.md docs/BOOTSTRAP.md docs/PRESENTATION.md docs/RESULT_EXAMPLES.md docs/DISK.md docs/DISK_VALIDATION.md dist/vmbench/docs/
 cp scripts/bootstrap-common.sh scripts/go-toolchain.lock dist/vmbench/scripts/
 chmod +x dist/vmbench/init.sh dist/vmbench/start.sh
 # Third-party static binaries must be built from the pinned sources recorded below.

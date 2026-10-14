@@ -141,3 +141,21 @@ func TestNetworkDoesNotDisplayUnmeasuredUDPFields(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestDiskLifecycleDisplaysSizesPreparationAndCleanupFailure(t *testing.T) {
+	r := diskFixture("randread-4k", 3)
+	r.Results["disk_lifecycle"] = disk.Lifecycle{Target: "/test-data", Workspace: "/test-data/.vmbench-fixture", FileBytes: 2 << 30, TotalBytes: 8 << 30, Jobs: 4, PreparationSeconds: 12, Prepared: true, CleanupCompleted: true}
+	text := output(t, r)
+	for _, want := range []string{"/test-data", "2.000 GiB", "8.000 GiB", "Preparation (not measured by fio)", "Temporary file cleanup"} {
+		if !strings.Contains(text, want) {
+			t.Fatal(text)
+		}
+	}
+	life := r.Results["disk_lifecycle"].(disk.Lifecycle)
+	life.CleanupCompleted = false
+	r.Results["disk_lifecycle"] = life
+	text = output(t, r)
+	if !strings.Contains(text, "Status: FAILED") || !strings.Contains(text, "cleanup incomplete") || !strings.Contains(text, life.Workspace) {
+		t.Fatal(text)
+	}
+}

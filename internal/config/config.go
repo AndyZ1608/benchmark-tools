@@ -12,16 +12,16 @@ import (
 )
 
 type Config struct {
-	Preset, Path, Profile, Engine, Target, Bind, Method, Size, FileSize, Window, Bitrate     string
-	Workers, Duration, Warmup, Repetitions, Depth, Jobs, Port, Streams, Load, Sample, Packet int
-	NonInteractive, ConfirmWrites, Direct, UDP, Reverse, Bidir, Precondition                 bool
-	Details                                                                                  bool
+	Preset, Path, Profile, Engine, Target, Bind, Method, Size, FileSize, Window, Bitrate, DataSeed string
+	Workers, Duration, Warmup, Repetitions, Depth, Jobs, Port, Streams, Load, Sample, Packet       int
+	NonInteractive, ConfirmWrites, Direct, UDP, Reverse, Bidir, Precondition                       bool
+	Details, DiskSizeExplicit                                                                      bool
 
 	StabilityCV, StealWarningPercent float64
 }
 
 func Defaults(p string) (Config, error) {
-	c := Config{StabilityCV: 5, StealWarningPercent: 1, Preset: p, Workers: int(math.Ceil(system.Detect().Capacity)), Duration: 10, Warmup: 2, Repetitions: 3, Profile: "randread-4k", Engine: "io_uring", Size: "256MiB", FileSize: "1GiB", Depth: 32, Jobs: 1, Port: 5201, Streams: 1, Load: 100, Sample: 1, Packet: 1400, Bind: "127.0.0.1", Method: "all", Bitrate: "100M", Direct: true}
+	c := Config{DataSeed: "random", StabilityCV: 5, StealWarningPercent: 1, Preset: p, Workers: int(math.Ceil(system.Detect().Capacity)), Duration: 10, Warmup: 2, Repetitions: 3, Profile: "randread-4k", Engine: "io_uring", Size: "256MiB", FileSize: "1GiB", Depth: 32, Jobs: 1, Port: 5201, Streams: 1, Load: 100, Sample: 1, Packet: 1400, Bind: "127.0.0.1", Method: "all", Bitrate: "100M", Direct: true}
 	switch p {
 	case "quick":
 		c.Duration = 2
@@ -56,7 +56,11 @@ func Bytes(s string) (int64, error) {
 	}
 	return n, nil
 }
-func Parse(args []string) (Config, error) {
+func Parse(args []string) (Config, error) { return parse(args, false) }
+func ParseCommand(command string, args []string) (Config, error) {
+	return parse(args, command == "disk test")
+}
+func parse(args []string, diskCommand bool) (Config, error) {
 	preset := "standard"
 	file := ""
 	for i, a := range args {
@@ -115,8 +119,12 @@ func Parse(args []string) (Config, error) {
 	for _, v := range []struct {
 		k string
 		p *string
-	}{{"path", &c.Path}, {"profile", &c.Profile}, {"ioengine", &c.Engine}, {"target", &c.Target}, {"bind", &c.Bind}, {"method", &c.Method}, {"size", &c.Size}, {"file-size", &c.FileSize}, {"window", &c.Window}, {"bitrate", &c.Bitrate}} {
-		f.StringVar(v.p, v.k, *v.p, v.k)
+	}{{"path", &c.Path}, {"profile", &c.Profile}, {"ioengine", &c.Engine}, {"target", &c.Target}, {"bind", &c.Bind}, {"method", &c.Method}, {"size", &c.Size}, {"file-size", &c.FileSize}, {"window", &c.Window}, {"bitrate", &c.Bitrate}, {"data-seed", &c.DataSeed}} {
+		if v.k == "size" && diskCommand {
+			f.StringVar(&c.FileSize, "size", c.FileSize, "disk file size per job")
+		} else {
+			f.StringVar(v.p, v.k, *v.p, v.k)
+		}
 	}
 	for _, v := range []struct {
 		k string
@@ -152,6 +160,11 @@ func Parse(args []string) (Config, error) {
 	if len(f.Args()) > 0 {
 		return c, fmt.Errorf("unexpected arguments: %v", f.Args())
 	}
+	f.Visit(func(flag *flag.Flag) {
+		if flag.Name == "file-size" || diskCommand && flag.Name == "size" {
+			c.DiskSizeExplicit = true
+		}
+	})
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
@@ -169,6 +182,11 @@ func (c Config) Validate() error {
 	}
 	if c.Workers < 1 || c.Workers > 4096 || c.Duration < 1 || c.Duration > 86400 || c.Warmup < 0 || c.Warmup > 3600 || c.Repetitions < 1 || c.Repetitions > 30 || c.Depth < 1 || c.Depth > 1024 || c.Jobs < 1 || c.Jobs > 128 || c.Streams < 1 || c.Streams > 128 || c.Port < 1 || c.Port > 65535 || c.Load < 1 || c.Load > 100 || c.Sample < 1 || c.Packet < 64 || c.Packet > 65507 {
 		return fmt.Errorf("parameter outside supported limits")
+	}
+	if c.DataSeed != "random" {
+		if _, err := strconv.ParseUint(c.DataSeed, 0, 64); err != nil {
+			return fmt.Errorf("--data-seed must be random or an unsigned 64-bit integer")
+		}
 	}
 	if _, e := Bytes(c.Size); e != nil {
 		return e

@@ -12,6 +12,7 @@ type Metric struct{ Label, Value string }
 type Module struct {
 	Command, Status, Assessment string
 	Metrics                     []Metric
+	Context                     []Metric
 	Notes, Warnings             []string
 	Tables                      []Table
 }

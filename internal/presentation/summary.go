@@ -233,6 +233,13 @@ func renderModule(w io.Writer, r report.Report, m Module, color bool) {
 	if r.Command != "full test" {
 		fmt.Fprintf(w, "Duration: %s seconds\n", number(r.DurationSeconds, 2))
 	}
+	if len(m.Context) > 0 {
+		t := Table{}
+		for _, v := range m.Context {
+			t.Rows = append(t.Rows, []string{v.Label, " : " + v.Value})
+		}
+		table(w, t)
+	}
 	if len(m.Metrics) > 0 {
 		fmt.Fprintln(w, "\nPERFORMANCE\n"+separator)
 		t := Table{}

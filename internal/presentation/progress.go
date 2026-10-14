@@ -47,6 +47,14 @@ func (p *Progress) Finish(state string) {
 
 // Observe announces real external-engine starts; it never estimates elapsed-time percentages.
 func (p *Progress) Observe(event runner.Event) {
+	if event.Phase != "" {
+		if p.Interactive {
+			fmt.Fprint(p.Writer, "\r"+strings.Repeat(" ", p.width)+"\r")
+			p.width = 0
+		}
+		fmt.Fprintln(p.Writer, clean(event.Message))
+		return
+	}
 	if !event.Starting || len(event.Args) == 0 || event.Args[0] == "--version" {
 		return
 	}

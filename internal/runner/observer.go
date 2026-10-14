@@ -6,10 +6,11 @@ import (
 )
 
 type Event struct {
-	Name     string
-	Args     []string
-	Starting bool
-	Error    error
+	Name           string
+	Args           []string
+	Starting       bool
+	Error          error
+	Phase, Message string
 }
 type observerKey struct{}
 
@@ -27,4 +28,11 @@ func observedRun(ctx context.Context, name string, args []string, timeout time.D
 		observer(Event{Name: name, Args: append([]string(nil), args...), Error: err})
 	}
 	return out, err
+}
+
+// Notice reports lifecycle changes outside measured engine execution.
+func Notice(ctx context.Context, phase, message string) {
+	if observer, _ := ctx.Value(observerKey{}).(func(Event)); observer != nil {
+		observer(Event{Name: "disk", Phase: phase, Message: message})
+	}
 }

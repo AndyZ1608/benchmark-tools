@@ -118,6 +118,17 @@ func diskProfile(p string) string {
 	return p
 }
 func diskModule(r report.Report, m Module, threshold float64) Module {
+	if life, ok := decode[disk.Lifecycle](r.Results["disk_lifecycle"]); ok && life.Workspace != "" {
+		cleanup := "INCOMPLETE"
+		if life.CleanupCompleted {
+			cleanup = "COMPLETED"
+		}
+		m.Context = []Metric{{"Target", life.Target}, {"Jobs", strconv.Itoa(life.Jobs)}, {"File size per job", unit(float64(life.FileBytes)/(1<<30), "GiB", 3)}, {"Total test data", unit(float64(life.TotalBytes)/(1<<30), "GiB", 3)}, {"Preparation (not measured by fio)", unit(life.PreparationSeconds, "s", 2)}, {"Temporary file cleanup", cleanup}}
+		if !life.CleanupCompleted {
+			m.Status = "failed"
+			m.Warnings = append(m.Warnings, "Temporary file cleanup incomplete; inspect the retained workspace: "+life.Workspace)
+		}
+	}
 	groups, runs := diskGroups(r)
 	for _, run := range runs {
 		if len(run.Jobs) == 0 {

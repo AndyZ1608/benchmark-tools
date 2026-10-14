@@ -21,6 +21,7 @@ import (
 	"vmbench/internal/presentation"
 	"vmbench/internal/report"
 	"vmbench/internal/runner"
+	"vmbench/internal/safety"
 	"vmbench/internal/system"
 	"vmbench/internal/version"
 )
@@ -31,7 +32,8 @@ Commands: cpu test | cpu stress | ram test | ram stress | disk test
 Flags: --version|-v | --help
        --preset quick|standard|precision --config FILE --non-interactive
        --workers N --duration SECONDS --warmup SECONDS --repetitions N
-       --size 256MiB --path DIRECTORY --file-size 1GiB --confirm-writes
+       --size BYTES (RAM dataset; disk per job) --path DIRECTORY
+       --file-size 1GiB (disk alias) --data-seed random|N --confirm-writes
        --profile randread-4k|randwrite-4k|mixed-70-30|seqread-1m|seqwrite-1m|latency|qd-scaling
        --ioengine io_uring|libaio --iodepth N --numjobs N --target IP
        --bind IP --port N --streams N --udp --bitrate 100M --reverse --bidir
@@ -70,7 +72,7 @@ func run() error {
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}
-	c, e := config.Parse(a[2:])
+	c, e := config.ParseCommand(command, a[2:])
 	if e != nil {
 		return e
 	}
@@ -151,7 +153,7 @@ func run() error {
 			r.Results[cmd], err = memory.Run(ctx, c, cmd == "ram stress")
 		case "disk test":
 			r.Warnings = append(r.Warnings, "Read tests also write dataset initialization. Direct I/O does not bypass all storage caches. Benchmark files limited to selected size.")
-			metadata, x := system.Filesystem(c.Path)
+			metadata, x := safety.ValidateDirectory(c.Path)
 			if x != nil {
 				states[cmd] = "failed"
 				return x
@@ -160,9 +162,10 @@ func run() error {
 			if same, _ := metadata["system_filesystem"].(bool); same {
 				r.Warnings = append(r.Warnings, "Disk target is on the system filesystem")
 			}
-			res, raw, x := disk.Run(ctx, c, r.ID)
-			r.Results[cmd] = res
-			r.Results["fio_raw"] = raw
+			outcome, x := disk.RunManaged(ctx, c, r.ID)
+			r.Results[cmd] = outcome.Results
+			r.Results["fio_raw"] = outcome.Raw
+			r.Results["disk_lifecycle"] = outcome.Lifecycle
 			err = x
 		case "network server":
 			err = network.ServerOutput(ctx, c, os.Stderr)

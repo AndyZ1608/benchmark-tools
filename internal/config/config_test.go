@@ -43,3 +43,23 @@ func TestPresentationOptions(t *testing.T) {
 		t.Fatal(c, e)
 	}
 }
+
+func TestDiskSizeAliasSeedAndPrecedence(t *testing.T) {
+	c, err := ParseCommand("disk test", []string{"--size", "2GiB", "--numjobs", "4", "--data-seed", "42"})
+	if err != nil || c.FileSize != "2GiB" || c.Size != "256MiB" || !c.DiskSizeExplicit || c.DataSeed != "42" {
+		t.Fatal(c, err)
+	}
+	ram, err := ParseCommand("ram test", []string{"--size", "2GiB"})
+	if err != nil || ram.Size != "2GiB" || ram.FileSize != "1GiB" {
+		t.Fatal(ram, err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(path, []byte("file-size: 1GiB\ndata-seed: 7\n"), 0600)
+	c, err = ParseCommand("disk test", []string{"--config", path, "--size", "2GiB", "--data-seed", "42"})
+	if err != nil || c.FileSize != "2GiB" || c.DataSeed != "42" {
+		t.Fatal(c, err)
+	}
+	if _, err = Parse([]string{"--data-seed", "-1"}); err == nil {
+		t.Fatal("invalid seed accepted")
+	}
+}
