@@ -112,6 +112,12 @@ test) echo "go-test {version} ${{GOPROXY:-default}}" >> "$FIXTURE_LOG";;
         self.env['FIXTURE_BUILD_FAIL']='1';self.run_script('init.sh',['--offline'],ok=False);self.assertFalse((self.root/'.vmbench/install-state.json').exists());self.assertFalse((self.root/'.vmbench/init.lock').exists());self.assertEqual(list((self.root/'.vmbench').glob('staging.*')),[])
     def test_cli_source_changes_only_cli_rebuilds(self):
         self.first();before=self.calls();(self.root/'cmd/vmbench/main.go').write_text('package main // changed\n');self.run_script(args=['--offline','--help']);delta=self.calls()[len(before):];self.assertIn('cli-build',delta);self.assertNotIn('native-build',delta)
+    def test_presentation_source_change_rebuilds_only_cli(self):
+        source=self.root/'internal/presentation/summary.go';source.parent.mkdir();source.write_text('package presentation\n')
+        self.first();before=self.calls();source.write_text('package presentation // changed\n')
+        self.run_script(args=['--offline','--help']);delta=self.calls()[len(before):]
+        self.assertEqual(delta.count('cli-build'),1);self.assertNotIn('native-build',delta);self.assertNotIn('network-or-install',delta)
+        before=self.calls();self.run_script(args=['--offline','--help']);self.assertEqual(self.calls(),before)
     def test_native_source_changes_only_native_rebuilds(self):
         self.first();before=self.calls();(self.root/'native/compute-bench.c').write_text('/* changed */\n');self.run_script(args=['--offline','--help']);delta=self.calls()[len(before):];self.assertNotIn('cli-build',delta);self.assertIn('native-build',delta)
     def test_invalid_state_revalidated_without_build(self):

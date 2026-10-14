@@ -25,7 +25,7 @@ import (
 	"vmbench/internal/version"
 )
 
-const helpBody = ` — offline Linux VM benchmarking
+const helpBody = ` - offline Linux VM benchmarking
 Commands: cpu test | cpu stress | ram test | ram stress | disk test
           network server | network test | full test | system info | version
 Flags: --version|-v | --help
@@ -35,15 +35,14 @@ Flags: --version|-v | --help
        --profile randread-4k|randwrite-4k|mixed-70-30|seqread-1m|seqwrite-1m|latency|qd-scaling
        --ioengine io_uring|libaio --iodepth N --numjobs N --target IP
        --bind IP --port N --streams N --udp --bitrate 100M --reverse --bidir
-       --output results
-       --details | --json --lang vi|en --stability-cv 5
+       --details --stability-cv 5 --steal-warning-percent 1
 `
 
 func helpText() string { return "VMBench " + version.Current() + helpBody }
 
 func main() {
 	if e := run(); e != nil {
-		fmt.Fprintln(os.Stderr, "ERROR:", e)
+		fmt.Fprintln(os.Stderr, "ERROR:", presentation.SafeText(e.Error()))
 		os.Exit(1)
 	}
 }
@@ -73,21 +72,13 @@ func run() error {
 	}
 	c, e := config.Parse(a[2:])
 	if e != nil {
-		if c.JSON {
-			return failureReport(command, c, e)
-		}
 		return e
 	}
 	if command == "system info" {
-		b, _ := json.MarshalIndent(system.Detect(), "", "  ")
-		fmt.Println(string(b))
-		return nil
+		return presentation.RenderSystemInfo(os.Stdout, system.Detect())
 	}
 	if runtime.GOOS != "linux" {
 		e = fmt.Errorf("benchmark execution requires Linux; this build supports help/version only")
-		if c.JSON {
-			return failureReport(command, c, e)
-		}
 		return e
 	}
 	if len(a) == 2 && !c.NonInteractive {
@@ -134,7 +125,7 @@ func run() error {
 		}
 	}
 	r.Results["execution_status"] = states
-	progress := presentation.Progress{Writer: os.Stderr, Lang: c.Lang, Interactive: presentation.ColorEnabled(os.Stderr)}
+	progress := presentation.Progress{Writer: os.Stderr, Interactive: presentation.ColorEnabled(os.Stderr)}
 	ctx = runner.WithObserver(ctx, progress.Observe)
 	if c.Preset == "quick" {
 		r.Warnings = append(r.Warnings, "Preliminary workload; unsuitable for rigorous cross-platform comparisons")
@@ -233,30 +224,20 @@ func run() error {
 		r.Status = "failed"
 		r.Errors = append(r.Errors, e.Error())
 	}
-	r.Warnings = append(r.Warnings, presentation.GeneratedWarnings(r)...)
 	return finishReport(r, e)
 }
 
-func failureReport(command string, c config.Config, cause error) error {
-	r := report.New(command, c)
-	r.Status = "failed"
-	r.Errors = append(r.Errors, cause.Error())
-	r.Results["execution_status"] = map[string]string{command: "failed"}
-	return finishReport(r, cause)
-}
-
+// finishReport renders in-memory observations without writing report files.
 func finishReport(r report.Report, cause error) error {
-	p, saveErr := r.Save()
-	if saveErr != nil {
-		r.Status = "failed"
-		r.Errors = append(r.Errors, "report: "+saveErr.Error())
-		p = ""
+	for _, m := range presentation.Modules(r) {
+		if m.Status == "failed" && cause == nil {
+			cause = fmt.Errorf("%s produced invalid or incomplete results", m.Command)
+			r.Status = "failed"
+			r.Errors = append(r.Errors, cause.Error())
+		}
 	}
-	if renderErr := presentation.Render(os.Stdout, r, p, presentation.ColorEnabled(os.Stdout)); renderErr != nil {
-		return renderErr
-	}
-	if saveErr != nil {
-		return saveErr
+	if err := presentation.Render(os.Stdout, r, presentation.ColorEnabled(os.Stdout)); err != nil {
+		return err
 	}
 	return cause
 }

@@ -18,7 +18,6 @@ import (
 
 func fixture(command string, n int) report.Report {
 	c, _ := config.Defaults("quick")
-	c.Lang = "en"
 	c.Workers = 4
 	c.Repetitions = n
 	r := report.New(command, c)
@@ -51,7 +50,7 @@ func nativeFixture(command string, n int) report.Report {
 func output(t *testing.T, r report.Report) string {
 	t.Helper()
 	var b bytes.Buffer
-	if e := Render(&b, r, "results/fixture.json", false); e != nil {
+	if e := Render(&b, r, false); e != nil {
 		t.Fatal(e)
 	}
 	return b.String()
@@ -59,7 +58,7 @@ func output(t *testing.T, r report.Report) string {
 func TestCPUSummaryAndMissingSteal(t *testing.T) {
 	r := nativeFixture("cpu test", 1)
 	s := output(t, r)
-	for _, want := range []string{"Completed", "90.0 %", "95.0 %", "Integer", "Floating Point", "Insufficient data", "Not measured", "Reported integrity errors", "results/fixture.json"} {
+	for _, want := range []string{"COMPLETED", "90.0%", "95.0%", "Integer", "FP", "Insufficient data", "N/A", "Computation errors"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
@@ -78,27 +77,26 @@ func TestStabilityEvidence(t *testing.T) {
 		cv   float64
 		want string
 	}{{1, 0, "Insufficient data"}, {2, 0, "Insufficient data"}, {3, 0, "Stable"}, {3, .20, "Variable"}} {
-		label, _ := stability("en", []statistics.Summary{{Count: c.n, Mean: 100, CV: c.cv}}, 5)
+		label, _ := stability([]statistics.Summary{{Count: c.n, Mean: 100, CV: c.cv}}, 5)
 		if label != c.want {
 			t.Fatal(c, label)
 		}
 	}
-	if cvText("en", statistics.Summary{Count: 1, CV: 0}) != "N/A" {
+	if cvText(statistics.Summary{Count: 1, CV: 0}) != "N/A" {
 		t.Fatal("single CV was displayed")
 	}
-	if !strings.Contains(cvText("en", statistics.Summary{Count: 2, CV: .1}), "limited evidence") {
+	if !strings.Contains(cvText(statistics.Summary{Count: 2, CV: .1}), "limited evidence") {
 		t.Fatal("two samples lacked caution")
 	}
-	label, _ := stability("en", []statistics.Summary{{Count: 3, Mean: 100, CV: .1}}, 15)
+	label, _ := stability([]statistics.Summary{{Count: 3, Mean: 100, CV: .1}}, 15)
 	if label != "Stable" {
 		t.Fatal("threshold not honored")
 	}
 }
-func TestLocalizationAndFormatting(t *testing.T) {
+func TestEnglishLabelsAndFormatting(t *testing.T) {
 	r := nativeFixture("ram test", 3)
-	r.Settings.Lang = "vi"
 	s := output(t, r)
-	for _, want := range []string{"Hoàn thành", "Băng thông TRIAD", "Độ trễ truy cập phụ thuộc", "Ổn định", "28.60 GB/s", "85.00 ns"} {
+	for _, want := range []string{"COMPLETED", "Memory bandwidth (TRIAD)", "Memory latency (dependent access)", "Stable", "28.60 GB/s", "85.00 ns"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
@@ -107,15 +105,12 @@ func TestLocalizationAndFormatting(t *testing.T) {
 		t.Fatal("number formatting")
 	}
 }
-func TestCacheWarningProminentAndPersistable(t *testing.T) {
+func TestCacheWarningProminent(t *testing.T) {
 	r := nativeFixture("ram test", 3)
 	r.Settings.Size = "12MiB"
 	s := output(t, r)
 	if !strings.Contains(s, "cache effects may dominate") {
 		t.Fatal(s)
-	}
-	if len(GeneratedWarnings(r)) != 1 {
-		t.Fatal(GeneratedWarnings(r))
 	}
 	r.System.Raw = nil
 	if !strings.Contains(output(t, r), "LLC size is unavailable") {
@@ -125,7 +120,7 @@ func TestCacheWarningProminentAndPersistable(t *testing.T) {
 func diskFixture(profile string, n int) report.Report {
 	r := fixture("disk test", n)
 	r.Settings.Profile = profile
-	run := disk.Result{Jobs: []disk.Job{{Read: disk.Direction{IOPS: 70, BWBytes: 286720, Runtime: 1000, Completion: disk.Latency{Percentile: map[string]float64{"99.000000": 20000}}}, Write: disk.Direction{IOPS: 30, BWBytes: 122880, Runtime: 1000, Completion: disk.Latency{Percentile: map[string]float64{"99.000000": 40000}}}}}}
+	run := disk.Result{Jobs: []disk.Job{{Read: disk.Direction{IOPS: 70, BWBytes: 286720, Runtime: 1000, Completion: disk.Latency{Mean: 10000, Percentile: map[string]float64{"99.000000": 20000}}}, Write: disk.Direction{IOPS: 30, BWBytes: 122880, Runtime: 1000, Completion: disk.Latency{Mean: 30000, Percentile: map[string]float64{"99.000000": 40000}}}}}}
 	runs := []disk.Result{}
 	for i := 0; i < n; i++ {
 		runs = append(runs, run)
@@ -141,7 +136,7 @@ func TestMixedDiskSeparatesPercentilesAndUnits(t *testing.T) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
 	}
-	if strings.Contains(s, "0.030 ms") {
+	if strings.Contains(metricValue(Modules(r)[0], text("p99")), "0.030 ms") {
 		t.Fatal("percentiles averaged")
 	}
 	r.Settings.Profile = "randwrite-4k"
@@ -181,7 +176,7 @@ func TestNetworkReceiverOnlyAndNoInventedRTT(t *testing.T) {
 	}
 	r.Settings.Details = true
 	s = output(t, r)
-	if !strings.Contains(s, "RTT was not measured") {
+	if strings.Contains(s, "RTT") || strings.Contains(s, "UDP loss") {
 		t.Fatal(s)
 	}
 }
@@ -191,12 +186,12 @@ func TestUDPAndBidirectionalPreserveDirections(t *testing.T) {
 	r.Settings.Bidir = true
 	r.Results["network test"] = []network.Result{{End: json.RawMessage(`{"sum_received":{"bits_per_second":100000000,"seconds":10,"jitter_ms":0.3,"lost_percent":2},"sum_received_bidir_reverse":{"bits_per_second":90000000,"seconds":10,"jitter_ms":0.4,"lost_percent":5}}`)}}
 	s := output(t, r)
-	for _, want := range []string{"0.10 Gbps", "0.09 Gbps", "2.00 %", "5.00 %", "0.300 ms", "0.400 ms"} {
+	for _, want := range []string{"0.10 Gbps", "0.09 Gbps", "2.00%", "5.00%", "0.300 ms", "0.400 ms"} {
 		if !strings.Contains(s, want) {
 			t.Fatal(want, s)
 		}
 	}
-	if len(Modules(r)[0].Metrics) > 5 {
+	if len(Modules(r)[0].Metrics) > 6 {
 		t.Fatal("too many metrics")
 	}
 }
@@ -227,19 +222,19 @@ func TestMissingMeasurementsAndDetails(t *testing.T) {
 		t.Fatal(s)
 	}
 }
-func TestJSONOnlyStdoutAndRoundTrip(t *testing.T) {
-	r := nativeFixture("cpu test", 1)
-	r.Settings.JSON = true
-	var b bytes.Buffer
-	if e := Render(&b, r, "results/x.json", true); e != nil {
-		t.Fatal(e)
-	}
-	var restored report.Report
-	if e := json.Unmarshal(b.Bytes(), &restored); e != nil {
-		t.Fatal(e, b.String())
-	}
-	if restored.ID != r.ID || restored.Results["cpu test"] == nil || strings.Contains(b.String(), "\x1b[") {
-		t.Fatal("report changed")
+func TestHumanReadableWithoutJSONOrReportPath(t *testing.T) {
+	for _, details := range []bool{false, true} {
+		r := nativeFixture("cpu test", 1)
+		r.Settings.Details = details
+		s := output(t, r)
+		if json.Valid([]byte(s)) || strings.Contains(s, "Full report") || strings.Contains(s, "results/") || strings.Contains(s, "\"measurements\"") {
+			t.Fatal(s)
+		}
+		for _, c := range s {
+			if c > 127 {
+				t.Fatalf("non-ASCII character %q", c)
+			}
+		}
 	}
 }
 func TestNoColorModeAndFailureWarnings(t *testing.T) {
@@ -254,7 +249,7 @@ func TestNoColorModeAndFailureWarnings(t *testing.T) {
 	r.Errors = []string{"engine verification failed"}
 	r.Warnings = []string{"same warning", "same warning"}
 	s := output(t, r)
-	if !strings.Contains(s, "Failed") || !strings.Contains(s, "engine verification failed") || strings.Contains(s, "RUNNING") || strings.Count(s, "same warning") != 1 {
+	if !strings.Contains(s, "FAILED") || !strings.Contains(s, "engine verification failed") || strings.Contains(s, "RUNNING") || strings.Count(s, "same warning") != 1 {
 		t.Fatal(s)
 	}
 }
@@ -264,7 +259,7 @@ func TestFullSummaryRespectsUnrunAndSkipped(t *testing.T) {
 	r.Results["execution_status"] = map[string]string{"cpu test": "completed", "ram test": "not_run", "disk test": "failed", "network test": "skipped"}
 	r.Status = "failed"
 	s := output(t, r)
-	for _, want := range []string{"FULL BENCHMARK RESULTS", "CPU", "RAM", "DISK", "NETWORK", "Not run", "Skipped", "Failed"} {
+	for _, want := range []string{"VMBENCH FULL TEST", "CPU", "RAM", "DISK", "NETWORK", "NOT RUN", "SKIPPED", "FAILED"} {
 		if !strings.Contains(s, want) {
 			t.Fatal(want, s)
 		}
@@ -275,16 +270,16 @@ func TestFullSummaryRespectsUnrunAndSkipped(t *testing.T) {
 }
 func TestProgressBoundariesOnly(t *testing.T) {
 	var b bytes.Buffer
-	p := Progress{Writer: &b, Lang: "en"}
+	p := Progress{Writer: &b}
 	p.Start("cpu test")
 	time.Sleep(time.Millisecond)
 	p.Finish("completed")
 	s := b.String()
-	if !strings.Contains(s, "Preparing workload") || !strings.Contains(s, "Completed") || strings.Contains(s, "100%") || strings.Contains(s, "\r") {
+	if !strings.Contains(s, "Preparing workload") || !strings.Contains(s, "COMPLETED") || strings.Contains(s, "100%") || strings.Contains(s, "\r") {
 		t.Fatal(s)
 	}
 }
-func TestJSONReportContentsUnaffectedByRendering(t *testing.T) {
+func TestInMemoryResultsUnaffectedByRendering(t *testing.T) {
 	r := nativeFixture("ram test", 3)
 	before, _ := json.Marshal(r)
 	_ = output(t, r)
@@ -294,9 +289,9 @@ func TestJSONReportContentsUnaffectedByRendering(t *testing.T) {
 	}
 }
 
-func TestPhaseObserverSkipVersionAndJSONWriterSeparation(t *testing.T) {
+func TestPhaseObserverSkipsVersion(t *testing.T) {
 	var b bytes.Buffer
-	p := Progress{Writer: &b, Lang: "en"}
+	p := Progress{Writer: &b}
 	p.Observe(runner.Event{Name: "compute-bench", Args: []string{"--version"}, Starting: true})
 	if b.Len() != 0 {
 		t.Fatal("version probe became workload progress")
@@ -304,7 +299,7 @@ func TestPhaseObserverSkipVersionAndJSONWriterSeparation(t *testing.T) {
 	p.Start("cpu test")
 	p.Observe(runner.Event{Name: "compute-bench", Args: []string{"cpu", "4", "1", "0", "16MiB"}, Starting: true})
 	p.Finish("failed")
-	if !strings.Contains(b.String(), "Launching cpu; 4 Workers") || !strings.Contains(b.String(), "Failed") {
+	if !strings.Contains(b.String(), "Launching cpu; 4 threads") || !strings.Contains(b.String(), "FAILED") {
 		t.Fatal(b.String())
 	}
 }
@@ -317,7 +312,7 @@ func TestNOCOLOREnforcedByRenderer(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	r := nativeFixture("cpu test", 1)
 	var b bytes.Buffer
-	if err := Render(&b, r, "report.json", true); err != nil || strings.Contains(b.String(), "\x1b[") {
+	if err := Render(&b, r, true); err != nil || strings.Contains(b.String(), "\x1b[") {
 		t.Fatal(err, b.String())
 	}
 }
@@ -351,7 +346,7 @@ func TestJobFailureCannotAppearCompleted(t *testing.T) {
 	runs[0].Jobs[0].Error = 5
 	r.Results["disk test"] = runs
 	s := output(t, r)
-	if !strings.Contains(s, "VMBENCH DISK TEST | Failed") || !strings.Contains(s, "fio reported an I/O error") {
+	if !strings.Contains(s, "Status: FAILED") || !strings.Contains(s, "fio reported an I/O error") {
 		t.Fatal(s)
 	}
 }
@@ -364,7 +359,7 @@ func TestDetailedThrottlingUsesOnlyRecordedCounters(t *testing.T) {
 		t.Fatal("counter conversion")
 	}
 	s := output(t, r)
-	if !strings.Contains(s, "Recorded cgroup throttled time") || !strings.Contains(s, "2.50 ms") {
+	if !strings.Contains(s, "Cgroup throttled time") || !strings.Contains(s, "2.50 ms") {
 		t.Fatal(s)
 	}
 }

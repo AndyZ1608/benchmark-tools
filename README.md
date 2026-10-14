@@ -32,7 +32,7 @@ Subsequent launches verify source/binary hashes, engine identities, shared libra
 ./init.sh --yes                     # authorize missing apt packages
 ```
 
-`--reinit` forces source rebuilding; prebuilt-only releases are revalidated. `--offline`, `--yes`, `--engine-mode system|bundled`, and `--reinit` are startup options consumed only before the first CLI argument. Use `--` to end that prefix. All remaining arguments are forwarded exactly using `exec`; application exit codes and signals are preserved. Scripts resolve the repository from their own location and also work from other directories or paths containing spaces. Relative benchmark/output paths retain the caller's working-directory meaning.
+`--reinit` forces source rebuilding; prebuilt-only releases are revalidated. `--offline`, `--yes`, `--engine-mode system|bundled`, and `--reinit` are startup options consumed only before the first CLI argument. Use `--` to end that prefix. All remaining arguments are forwarded exactly using `exec`; application exit codes and signals are preserved. Scripts resolve the repository from their own location and also work from other directories or paths containing spaces. Relative benchmark paths retain the caller's working-directory meaning.
 
 Offline mode never uses apt, Git network operations, remote source fetching, package registries, or automatic Go toolchain downloads. A complete prebuilt release needs no Go, GCC, Python or binutils to initialize: only the standard Ubuntu runtime/base utilities and its verified engines. An offline source build needs a compatible local Go and GCC. Missing dependencies produce an error and leave no successful new state.
 
@@ -57,14 +57,16 @@ Build the CLI: `go build ./cmd/vmbench`. Linux native kernel: `cc -O2 -fno-fast-
 ./vmbench full test --preset precision --path /data --non-interactive
 ```
 
-Benchmark results default to a compact Vietnamese summary. Use `--lang en` for English, `--details` for technical tables, or `--json` for the complete report as JSON on stdout. Progress and diagnostics go to stderr. Every benchmark still saves its full report; `--details` and `--json` are mutually exclusive. See [output rules](docs/PRESENTATION.md) and [illustrative summaries](docs/RESULT_EXAMPLES.md).
+Benchmark results use a compact English summary with ASCII layouts. `--details` adds human-readable workload statistics and recorded telemetry. Progress and errors go to stderr. Results stay in memory; the CLI does not print raw JSON, save benchmark reports or create `results/`. Existing historical reports are left untouched. `system info` also uses a text table. See [output rules](docs/PRESENTATION.md) and [illustrative summaries](docs/RESULT_EXAMPLES.md).
 
 ```bash
-./vmbench cpu test --preset quick --lang en
-./vmbench ram test --details --lang vi
-./vmbench disk test --path /data --json > disk-report.json
-./vmbench full test --path /data --lang en --stability-cv 5
+./vmbench cpu test --preset quick
+./vmbench ram test --details
+./vmbench disk test --path /data
+./vmbench full test --path /data --stability-cv 5 --steal-warning-percent 1
 ```
+
+The old language, JSON and output-directory options have been removed. Remove those fields from older YAML configurations. The default configuration already uses the supported options.
 
 No arguments opens a command prompt. Bare component commands prompt for worker count, duration, warmup and repetitions. Enter accepts defaults. Flags enable noninteractive use. `--config config/default.yaml` accepts a deliberately restricted flat YAML scalar mapping; nested YAML is rejected. Precedence: CLI > file > preset > defaults. Seconds are integers; sizes support bytes, KiB, MiB, GiB.
 
@@ -76,7 +78,7 @@ Disk uses exclusive file creation and anchored directory descriptors, never raw 
 
 Network defaults to loopback server bind; explicitly select an interface for peers. Use trusted networks. iperf3 throughput is not forwarding PPS. Its raw end/interval data preserves UDP jitter/loss and TCP metrics. Missing peer skips network. No independent RTT probe is implemented.
 
-Reports under `results/` contain workload, metadata, raw results, warnings, failures and elapsed time. Human output uses aligned text tables with optional status colors on suitable interactive terminals. `NO_COLOR`, redirected output and `TERM=dumb` disable colors. Green indicates successful execution only. No sysctl/governor/cache tuning occurs.
+Default warnings cover actionable failures, invalid results, data safety and material measurement limitations. General caveats are confined to details. CPU steal warnings use a configurable screening threshold (`--steal-warning-percent`, default 1%); small measurements remain visible without implying a performance problem. Human output supports `NO_COLOR`, redirected output and `TERM=dumb`; optional green status means successful execution only. No sysctl/governor/cache tuning occurs.
 
 ## Validation and limitations
 Run `go test ./...`. Release: `bash scripts/build.sh`; see docs/BUILD.md for incomplete third-party build prerequisites. The Go CLI and native kernel were cross-compiled for Linux; Go unit tests and Windows help/version were executed on this Windows host. Linux native kernels, real fio/stress-ng/iperf3 runs, cancellation of engine trees and Ubuntu offline compatibility remain unexecuted. Missing engines fail explicitly.

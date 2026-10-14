@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"vmbench/internal/config"
 	"vmbench/internal/report"
 	"vmbench/internal/version"
 )
@@ -19,6 +22,26 @@ func TestCLIProcess(t *testing.T) {
 	for i, a := range os.Args {
 		if a == "--" {
 			os.Args = append([]string{"vmbench"}, os.Args[i+1:]...)
+			if len(os.Args) > 1 && os.Args[1] == "fixture-summary" {
+				c, _ := config.Defaults("quick")
+				r := report.New("cpu test", c)
+				r.Status = "completed"
+				r.DurationSeconds = 12
+				r.Results["execution_status"] = map[string]string{"cpu test": "completed"}
+				r.Results["cpu test"] = []json.RawMessage{json.RawMessage(`{"kernel":"compute-bench-v1","workers":1,"measurements":[{"workload":"integer-xorshift64","unit":"defined_iterations/s","value":100,"elapsed_seconds":2,"integrity_errors":0},{"workload":"fp-multiply-add","unit":"defined_iterations/s","value":50,"elapsed_seconds":2,"integrity_errors":0}]}`)}
+				var cause error
+				if len(os.Args) > 2 {
+					r.Status = "failed"
+					r.Results["execution_status"] = map[string]string{"cpu test": "failed"}
+					cause = fmt.Errorf("fixture engine failure")
+					r.Errors = append(r.Errors, cause.Error())
+				}
+				if err := finishReport(r, cause); err != nil {
+					fmt.Fprintln(os.Stderr, "ERROR:", err)
+					os.Exit(1)
+				}
+				os.Exit(0)
+			}
 			main()
 			os.Exit(0)
 		}
@@ -28,8 +51,13 @@ func TestCLIProcess(t *testing.T) {
 
 func invokeCLI(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
+	return invokeCLIInDir(t, "", args...)
+}
+func invokeCLIInDir(t *testing.T, dir string, args ...string) (string, string, error) {
+	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestCLIProcess$", "--"}, args...)...)
-	cmd.Env = append(os.Environ(), "VMBENCH_TEST_CLI_PROCESS=1")
+	cmd.Env = append(os.Environ(), "VMBENCH_TEST_CLI_PROCESS=1", "NO_COLOR=1")
+	cmd.Dir = dir
 	var out, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	err := cmd.Run()
@@ -64,8 +92,7 @@ func TestHelp(t *testing.T) {
 
 func TestSystemInfoCommand(t *testing.T) {
 	out, stderr, err := invokeCLI(t, "system", "info")
-	var result map[string]any
-	if err != nil || stderr != "" || json.Unmarshal([]byte(out), &result) != nil || result["Architecture"] == nil {
+	if err != nil || stderr != "" || json.Valid([]byte(out)) || !strings.Contains(out, "VMBENCH SYSTEM INFO") || !strings.Contains(out, "Architecture") {
 		t.Fatalf("%q %q %v", out, stderr, err)
 	}
 }
@@ -82,36 +109,78 @@ func TestComponentsStillValidateParameters(t *testing.T) {
 	}
 }
 
-func TestJSONFailureStdoutAndSavedReport(t *testing.T) {
+func TestFinalSummaryDoesNotWriteReports(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		dir := t.TempDir()
+		historical := filepath.Join(dir, "results", "historical.json")
+		if err := os.MkdirAll(filepath.Dir(historical), 0755); err != nil {
+			t.Fatal(err)
+		}
+		original := []byte("historical user result - preserve exactly\n")
+		if err := os.WriteFile(historical, original, 0644); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{"fixture-summary"}
+		if failure {
+			args = append(args, "failed")
+		}
+		out, stderr, err := invokeCLIInDir(t, dir, args...)
+		if (err != nil) != failure || json.Valid([]byte(out)) || strings.Contains(out, "Full report") || strings.Contains(out, "Report saved") {
+			t.Fatal(out, stderr, err)
+		}
+		if !failure && !strings.Contains(out, "Status: COMPLETED") {
+			t.Fatal(out)
+		}
+		if failure && (!strings.Contains(out, "Status: FAILED") || !strings.Contains(stderr, "fixture engine failure")) {
+			t.Fatal(out, stderr)
+		}
+		entries, e := os.ReadDir(filepath.Dir(historical))
+		if e != nil || len(entries) != 1 {
+			t.Fatal(entries, e)
+		}
+		data, e := os.ReadFile(historical)
+		if e != nil || !bytes.Equal(data, original) {
+			t.Fatal("historical file changed", e)
+		}
+		entries, e = os.ReadDir(dir)
+		if e != nil || len(entries) != 1 {
+			t.Fatal("unexpected automatic files", entries, e)
+		}
+	}
 	dir := t.TempDir()
-	out, stderr, err := invokeCLI(t, "cpu", "test", "--json", "--duration", "0", "--output", dir)
-	if err == nil {
-		t.Fatal("invalid duration succeeded")
-	}
-	var r report.Report
-	if e := json.Unmarshal([]byte(out), &r); e != nil {
-		t.Fatalf("stdout is not JSON: %s (%v)", out, e)
-	}
-	if r.Status != "failed" || len(r.Errors) == 0 || !strings.Contains(stderr, "parameter outside supported limits") {
-		t.Fatal(r, stderr)
-	}
-	files, e := os.ReadDir(dir)
-	if e != nil || len(files) != 1 {
-		t.Fatal(files, e)
-	}
-	if strings.Contains(out, "Preparing workload") || strings.Contains(out, "WARNING:") {
-		t.Fatal("stdout polluted", out)
+	out, stderr, err := invokeCLIInDir(t, dir, "fixture-summary")
+	entries, e := os.ReadDir(dir)
+	if err != nil || e != nil || len(entries) != 0 {
+		t.Fatal(out, stderr, err, entries, e)
 	}
 }
-
-func TestJSONRejectsNonFinitePresentationThreshold(t *testing.T) {
-	for _, value := range []string{"NaN", "+Inf", "-Inf"} {
-		t.Run(value, func(t *testing.T) {
-			out, stderr, err := invokeCLI(t, "cpu", "test", "--json", "--output", t.TempDir(), "--stability-cv", value)
-			var r report.Report
-			if err == nil || json.Unmarshal([]byte(out), &r) != nil || r.Status != "failed" || !strings.Contains(stderr, value) {
-				t.Fatalf("non-finite threshold did not yield valid failure JSON: %q %q %v", out, stderr, err)
-			}
-		})
+func TestRemovedOptionsFailWithoutCreatingResults(t *testing.T) {
+	for _, flags := range [][]string{{"--json"}, {"--output", "results"}, {"--lang", "vi"}, {"--lang", "en"}} {
+		dir := t.TempDir()
+		args := append([]string{"cpu", "test"}, flags...)
+		out, stderr, err := invokeCLIInDir(t, dir, args...)
+		entries, e := os.ReadDir(dir)
+		if err == nil || out != "" || !strings.Contains(stderr, "flag provided but not defined") || e != nil || len(entries) != 0 {
+			t.Fatal(out, stderr, err, entries, e)
+		}
+	}
+}
+func TestHelpIsASCIIAndAdvertisesSupportedOptions(t *testing.T) {
+	out, _, err := invokeCLI(t, "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range out {
+		if c > 127 {
+			t.Fatalf("non-ASCII help character %q", c)
+		}
+	}
+	for _, flag := range []string{"--json", "--lang", "--output"} {
+		if strings.Contains(out, flag) {
+			t.Fatal("obsolete option", out)
+		}
+	}
+	if !strings.Contains(out, "--details") || !strings.Contains(out, "--steal-warning-percent") {
+		t.Fatal(out)
 	}
 }

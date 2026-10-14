@@ -29,17 +29,17 @@ func TestSizes(t *testing.T) {
 }
 
 func TestPresentationOptions(t *testing.T) {
-	c, e := Parse([]string{"--details", "--lang", "en", "--stability-cv", "10"})
-	if e != nil || !c.Details || c.Lang != "en" || c.StabilityCV != 10 {
+	c, e := Parse([]string{"--details", "--stability-cv", "10", "--steal-warning-percent", "2"})
+	if e != nil || !c.Details || c.StealWarningPercent != 2 || c.StabilityCV != 10 {
 		t.Fatal(c, e)
 	}
-	for _, a := range [][]string{{"--lang", "fr"}, {"--json", "--details"}, {"--stability-cv", "NaN"}, {"--stability-cv", "-1"}} {
+	for _, a := range [][]string{{"--lang", "vi"}, {"--lang", "en"}, {"--json"}, {"--output", "results"}, {"--steal-warning-percent", "NaN"}, {"--steal-warning-percent", "101"}, {"--stability-cv", "NaN"}, {"--stability-cv", "-1"}} {
 		if _, e := Parse(a); e == nil {
 			t.Fatal(a)
 		}
 	}
 	c, e = Parse(nil)
-	if e != nil || c.Lang != "vi" || c.Details || c.JSON {
+	if e != nil || c.Details || c.StealWarningPercent != 1 {
 		t.Fatal(c, e)
 	}
 }

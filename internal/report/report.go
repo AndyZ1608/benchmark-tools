@@ -3,15 +3,13 @@ package report
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"time"
 	"vmbench/internal/config"
 	"vmbench/internal/system"
 	"vmbench/internal/version"
 )
 
+// Report holds observations only in memory. There is no persistence or export API.
 type Report struct {
 	ID, Version, Command, Status string
 	Started                      time.Time
@@ -26,24 +24,4 @@ func New(command string, c config.Config) Report {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return Report{ID: hex.EncodeToString(b), Version: version.Current(), Command: command, Status: "running", Started: time.Now().UTC(), Settings: c, System: system.Detect(), Results: map[string]any{}, Warnings: []string{}, Errors: []string{}}
-}
-func (r *Report) Save() (string, error) {
-	if e := os.MkdirAll(r.Settings.Output, 0755); e != nil {
-		return "", e
-	}
-	b, e := json.MarshalIndent(r, "", "  ")
-	if e != nil {
-		return "", e
-	}
-	p := filepath.Join(r.Settings.Output, r.ID+".json")
-	f, e := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if e != nil {
-		return "", e
-	}
-	_, e = f.Write(b)
-	ce := f.Close()
-	if e == nil {
-		e = ce
-	}
-	return p, e
 }

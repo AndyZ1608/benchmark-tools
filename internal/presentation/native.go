@@ -60,14 +60,14 @@ func integrity(r report.Report, key string) (uint64, bool) {
 	}
 	return total, true
 }
-func errorMetric(r report.Report, key, status, lang string) string {
+func errorMetric(r report.Report, key, status string) string {
 	n, ok := integrity(r, key)
 	if !ok {
-		return text(lang, "unavailable")
+		return text("unavailable")
 	}
 	value := number(float64(n), 0)
 	if status == "failed" {
-		value += " (" + tr(lang, "partial results", "dữ liệu một phần") + ")"
+		value += " (partial results)"
 	}
 	return value
 }
@@ -78,70 +78,68 @@ func telemetry(r report.Report, key string) (float64, bool) {
 	}
 	b, present := m[key]
 	var v float64
-	if !present || json.Unmarshal(b, &v) != nil || !finite(v) {
+	if !present || json.Unmarshal(b, &v) != nil || (!finite(v) || v < 0 || v > 100) {
 		return 0, false
 	}
 	return v, true
 }
-func telemetryMetric(r report.Report, key, lang string) string {
+func telemetryMetric(r report.Report, key string) string {
 	v, ok := telemetry(r, key)
 	if !ok {
-		return text(lang, "unavailable")
+		return text("unavailable")
 	}
 	return unit(v, "%", 2)
 }
-func nativeTable(lang string, s []cpu.Summary) Table {
-	t := Table{Title: tr(lang, "Workload repetitions", "Các lần đo theo tác vụ"), Headers: []string{text(lang, "workload"), text(lang, "workers"), text(lang, "count"), text(lang, "median"), text(lang, "min"), text(lang, "max"), text(lang, "cv"), tr(lang, "Scaling", "Mức mở rộng"), tr(lang, "Efficiency", "Hiệu suất")}}
+func nativeTable(s []cpu.Summary) Table {
+	t := Table{Title: "Workload repetitions", Headers: []string{text("workload"), text("workers"), text("count"), text("median"), text("min"), text("max"), text("cv"), "Scaling", "Efficiency"}}
 	for _, v := range s {
 		factor, efficiency := "N/A", "N/A"
 		if v.Workers > 1 && v.ScalingFactor > 0 && finite(v.ScalingEfficiency) {
 			factor = number(v.ScalingFactor, 2) + "x"
 			efficiency = unit(v.ScalingEfficiency*100, "%", 1)
 		}
-		t.Rows = append(t.Rows, []string{v.Workload, strconv.Itoa(v.Workers), strconv.Itoa(v.Statistics.Count), unit(v.Statistics.Median, v.Unit, 3), number(v.Statistics.Min, 3), number(v.Statistics.Max, 3), cvText(lang, v.Statistics), factor, efficiency})
+		t.Rows = append(t.Rows, []string{v.Workload, strconv.Itoa(v.Workers), strconv.Itoa(v.Statistics.Count), unit(v.Statistics.Median, v.Unit, 3), number(v.Statistics.Min, 3), number(v.Statistics.Max, 3), cvText(v.Statistics), factor, efficiency})
 	}
 	return t
 }
-func cpuModule(r report.Report, m Module, lang string, threshold float64) Module {
+func cpuModule(r report.Report, m Module, threshold float64) Module {
+	if warning := cpuStealWarning(r); warning != "" {
+		m.Warnings = append(m.Warnings, warning)
+	}
 	if m.Command == "cpu stress" {
-		m.Metrics = []Metric{{text(lang, "busy"), telemetryMetric(r, "busy_percent", lang)}, {text(lang, "steal"), telemetryMetric(r, "steal_percent", lang)}, {text(lang, "elapsed"), unit(r.DurationSeconds, "s", 1)}}
-		m.Assessment = text(lang, "stress_done")
-		m.Notes = []string{text(lang, "stress_note")}
+		m.Metrics = []Metric{{text("busy"), telemetryMetric(r, "busy_percent")}, {text("steal"), telemetryMetric(r, "steal_percent")}, {text("elapsed"), unit(r.DurationSeconds, "s", 1)}}
+		m.Assessment = text("stress_done")
+		m.Notes = []string{text("stress_note")}
 		return m
 	}
 	s := nativeSummaries(r, m.Command)
 	var stats []statistics.Summary
 	for _, k := range []struct{ workload, label string }{{"integer-xorshift64", "integer_scaling"}, {"fp-multiply-add", "float_scaling"}} {
 		v, ok := selected(s, k.workload, "defined_iterations/s")
-		value := text(lang, "unavailable")
+		value := text("unavailable")
 		if ok {
 			stats = append(stats, v.Statistics)
 			if v.Workers > 1 && v.ScalingFactor > 0 && finite(v.ScalingEfficiency) {
-				value = fmt.Sprintf("%s (%d %s)", unit(v.ScalingEfficiency*100, "%", 1), v.Workers, text(lang, "workers"))
+				value = fmt.Sprintf("%s (%d %s)", unit(v.ScalingEfficiency*100, "%", 1), v.Workers, text("workers"))
 			} else {
-				m.Notes = append(m.Notes, text(lang, "single_only"))
+				m.Notes = append(m.Notes, text("single_only"))
 			}
 		}
-		m.Metrics = append(m.Metrics, Metric{text(lang, k.label), value})
+		m.Metrics = append(m.Metrics, Metric{text(k.label), value})
 	}
-	label, assessment := stability(lang, stats, threshold)
+	label, assessment := stability(stats, threshold)
 	if len(stats) < 2 {
-		label = text(lang, "insufficient")
-		assessment = text(lang, "missing_note")
+		label = text("insufficient")
+		assessment = text("missing_note")
 	}
-	m.Metrics = append(m.Metrics, Metric{text(lang, "steal"), telemetryMetric(r, "steal_percent", lang)}, Metric{text(lang, "integrity"), errorMetric(r, m.Command, m.Status, lang)}, Metric{text(lang, "stability"), label})
+	m.Metrics = append(m.Metrics, Metric{text("steal"), telemetryMetric(r, "steal_percent")}, Metric{"Computation errors", errorMetric(r, m.Command, m.Status)}, Metric{text("stability"), label})
 	m.Assessment = assessment
-	m.Notes = append(m.Notes, text(lang, "cpu_note"), text(lang, "baseline"))
-	if v, ok := telemetry(r, "steal_percent"); ok && v > 0 {
-		m.Warnings = append(m.Warnings, text(lang, "steal_note"))
-	}
-	if n, ok := integrity(r, m.Command); ok && n > 0 {
-		m.Assessment = text(lang, "investigate")
-	}
-	m.Tables = append(m.Tables, nativeTable(lang, s))
+	m.Notes = append(m.Notes, text("cpu_note"), text("baseline"))
+	m = integrityAssessment(r, m)
+	m.Tables = append(m.Tables, nativeTable(s))
 	return m
 }
-func cacheWarning(r report.Report, workers int, lang string) string {
+func cacheWarning(r report.Report, workers int) string {
 	largest := int64(0)
 	for path, level := range r.System.Raw {
 		if strings.HasSuffix(path, "/level") && strings.TrimSpace(level) == "3" {
@@ -161,61 +159,80 @@ func cacheWarning(r report.Report, workers int, lang string) string {
 		}
 	}
 	if largest == 0 {
-		return text(lang, "cache_unknown")
+		return text("cache_unknown")
 	}
 	dataset, e := config.Bytes(r.Settings.Size)
 	if e != nil || workers < 1 {
-		return text(lang, "cache_unknown")
+		return text("cache_unknown")
 	}
 	if dataset/int64(workers)/3 < 4*largest {
-		return text(lang, "cache_small")
+		return text("cache_small")
 	}
 	return ""
 }
-func memoryModule(r report.Report, m Module, lang string, threshold float64) Module {
+func memoryModule(r report.Report, m Module, threshold float64) Module {
 	s := nativeSummaries(r, m.Command)
 	if m.Command == "ram stress" {
 		raw, _ := decode[[]json.RawMessage](r.Results[m.Command])
-		sets := text(lang, "unavailable")
+		sets := text("unavailable")
 		if len(raw) > 0 {
 			sets = number(float64(len(raw)), 0)
 		}
-		m.Metrics = []Metric{{text(lang, "integrity"), errorMetric(r, m.Command, m.Status, lang)}, {tr(lang, "Recorded result sets", "Bộ kết quả đã ghi"), sets}, {text(lang, "elapsed"), unit(r.DurationSeconds, "s", 1)}}
-		m.Assessment = tr(lang, "Integrity checks finished for the recorded samples.", "Đã kiểm tra dữ liệu trong các mẫu được ghi nhận.")
-		m.Notes = []string{tr(lang, "Completion does not prove hardware reliability.", "Hoàn thành không chứng minh phần cứng đáng tin cậy.")}
-		m.Tables = append(m.Tables, nativeTable(lang, s))
+		m.Metrics = []Metric{{text("integrity"), errorMetric(r, m.Command, m.Status)}, {"Recorded result sets", sets}, {text("elapsed"), unit(r.DurationSeconds, "s", 1)}}
+		m.Assessment = "Integrity checks finished for the recorded samples."
+		m = integrityAssessment(r, m)
+		m.Notes = []string{"Completion does not prove hardware reliability."}
+		m.Tables = append(m.Tables, nativeTable(s))
 		return m
 	}
 	bw, bwOK := selected(s, "triad", "GB/s")
 	lat, latOK := selected(s, "dependent-pointer-chase", "ns/access mean per worker")
-	bandwidth, latency := text(lang, "unavailable"), text(lang, "unavailable")
+	bandwidth, latency := text("unavailable"), text("unavailable")
 	var stats []statistics.Summary
 	workers := r.Settings.Workers
 	if bwOK {
 		workers = bw.Workers
-		bandwidth = fmt.Sprintf("%s (%d %s)", unit(bw.Statistics.Median, "GB/s", 2), bw.Workers, text(lang, "workers"))
+		bandwidth = unit(bw.Statistics.Median, "GB/s", 2)
 		stats = append(stats, bw.Statistics)
 	}
 	if latOK {
 		latency = unit(lat.Statistics.Median, "ns", 2)
 		stats = append(stats, lat.Statistics)
 	}
-	label, assessment := stability(lang, stats, threshold)
+	label, assessment := stability(stats, threshold)
 	if !bwOK || !latOK {
-		label = text(lang, "insufficient")
-		assessment = text(lang, "missing_note")
+		label = text("insufficient")
+		assessment = text("missing_note")
 	}
-	m.Metrics = []Metric{{text(lang, "bandwidth"), bandwidth}, {text(lang, "latency"), latency}, {text(lang, "stability"), label}, {text(lang, "integrity"), errorMetric(r, m.Command, m.Status, lang)}}
+	m.Metrics = []Metric{{text("bandwidth"), bandwidth}, {text("latency"), latency}, {text("stability"), label}, {text("integrity"), errorMetric(r, m.Command, m.Status)}}
 	m.Assessment = assessment
-	m.Notes = []string{text(lang, "ram_note"), text(lang, "baseline")}
+	m.Notes = []string{text("ram_note"), text("baseline")}
 	if bwOK {
-		if w := cacheWarning(r, workers, lang); w != "" {
+		if w := cacheWarning(r, workers); w != "" {
 			m.Warnings = append(m.Warnings, w)
 		}
 	}
-	if n, ok := integrity(r, m.Command); ok && n > 0 {
-		m.Assessment = text(lang, "investigate")
+	m = integrityAssessment(r, m)
+	m.Tables = append(m.Tables, nativeTable(s))
+	return m
+}
+
+func integrityAssessment(r report.Report, m Module) Module {
+	count, ok := integrity(r, m.Command)
+	if !ok {
+		m.Warnings = append(m.Warnings, "Integrity results are unavailable; correctness cannot be confirmed.")
+		return m
 	}
-	m.Tables = append(m.Tables, nativeTable(lang, s))
+	if count > 0 {
+		m.Status = "failed"
+		m.Assessment = text("investigate")
+		m.Warnings = append(m.Warnings, "Integrity errors were detected; investigate before relying on these results.")
+		return m
+	}
+	if m.Command == "cpu test" {
+		m.Assessment += " No computation errors were reported."
+	} else {
+		m.Assessment += " No memory integrity errors were reported."
+	}
 	return m
 }

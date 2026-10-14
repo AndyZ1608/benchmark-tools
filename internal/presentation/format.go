@@ -9,7 +9,6 @@ import (
 )
 
 type Metric struct{ Label, Value string }
-type Detail struct{ Cells []string }
 type Module struct {
 	Command, Status, Assessment string
 	Metrics                     []Metric
@@ -61,7 +60,12 @@ func number(v float64, digits int) string {
 	}
 	return prefix + whole
 }
-func unit(v float64, u string, d int) string { return number(v, d) + " " + u }
+func unit(v float64, u string, d int) string {
+	if u == "%" {
+		return number(v, d) + u
+	}
+	return number(v, d) + " " + u
+}
 func rangeText(v []float64, u string, d int) string {
 	if len(v) == 0 {
 		return "N/A"
@@ -87,11 +91,21 @@ func unique(v []string) []string {
 	}
 	return out
 }
-func clean(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < ' ' || r == 127 {
-			return ' '
+
+// SafeText escapes non-ASCII input and removes terminal control characters.
+// Engine messages and user paths retain their information without changing locale.
+func SafeText(s string) string {
+	var out strings.Builder
+	for _, r := range s {
+		switch {
+		case r < ' ' || r == 127:
+			out.WriteByte(' ')
+		case r > 126:
+			fmt.Fprintf(&out, "\\u%04X", r)
+		default:
+			out.WriteRune(r)
 		}
-		return r
-	}, s)
+	}
+	return out.String()
 }
+func clean(s string) string { return SafeText(s) }

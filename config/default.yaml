@@ -9,4 +9,3 @@ profile: randread-4k
 ioengine: io_uring
 iodepth: 32
 numjobs: 1
-output: results

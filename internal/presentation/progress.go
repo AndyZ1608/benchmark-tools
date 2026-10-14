@@ -11,8 +11,8 @@ import (
 // Progress changes only at module boundaries, outside engine measurement timers.
 // No invented workload percentages or background polling are used.
 type Progress struct {
-	Writer      io.Writer
-	Lang        string
+	Writer io.Writer
+
 	Interactive bool
 	started     time.Time
 	command     string
@@ -26,7 +26,7 @@ func (p *Progress) Start(command string) {
 	if p.Interactive {
 		prefix = "\r"
 	}
-	line := command + ": " + text(p.Lang, "preparing") + "..."
+	line := command + ": " + text("preparing") + "..."
 	p.width = len([]rune(line))
 	fmt.Fprint(p.Writer, prefix+line)
 	if !p.Interactive {
@@ -38,7 +38,7 @@ func (p *Progress) Finish(state string) {
 	if p.Interactive {
 		prefix = "\r"
 	}
-	line := p.command + ": " + text(p.Lang, state) + " (" + unit(time.Since(p.started).Seconds(), "s", 1) + ")"
+	line := p.command + ": " + text(state) + " (" + unit(time.Since(p.started).Seconds(), "s", 1) + ")"
 	if p.Interactive && p.width > len([]rune(line)) {
 		line += strings.Repeat(" ", p.width-len([]rune(line)))
 	}
@@ -54,21 +54,21 @@ func (p *Progress) Observe(event runner.Event) {
 	switch event.Name {
 	case "compute-bench":
 		if len(event.Args) > 1 {
-			phase = event.Args[0] + "; " + event.Args[1] + " " + text(p.Lang, "workers")
+			phase = event.Args[0] + "; " + event.Args[1] + " " + text("workers")
 		}
 	case "fio":
-		phase = tr(p.Lang, "Disk dataset preparation", "Chuẩn bị dữ liệu đĩa")
+		phase = "Disk dataset preparation"
 		for _, arg := range event.Args {
 			if arg == "--time_based=1" {
-				phase = tr(p.Lang, "Disk measurement", "Đo đĩa")
+				phase = "Disk measurement"
 			}
 		}
 	case "stress-ng":
-		phase = tr(p.Lang, "CPU stress workload", "Tác vụ stress CPU")
+		phase = "CPU stress workload"
 	case "iperf3":
-		phase = tr(p.Lang, "Network engine", "Tác vụ mạng")
+		phase = "Network engine"
 	}
-	line := p.command + ": " + tr(p.Lang, "Launching ", "Khởi chạy ") + phase
+	line := p.command + ": " + "Launching " + phase
 	if p.Interactive {
 		width := len([]rune(line))
 		padding := ""
