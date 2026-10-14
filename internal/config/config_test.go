@@ -27,3 +27,19 @@ func TestSizes(t *testing.T) {
 		t.Fatal(n, e)
 	}
 }
+
+func TestPresentationOptions(t *testing.T) {
+	c, e := Parse([]string{"--details", "--lang", "en", "--stability-cv", "10"})
+	if e != nil || !c.Details || c.Lang != "en" || c.StabilityCV != 10 {
+		t.Fatal(c, e)
+	}
+	for _, a := range [][]string{{"--lang", "fr"}, {"--json", "--details"}, {"--stability-cv", "NaN"}, {"--stability-cv", "-1"}} {
+		if _, e := Parse(a); e == nil {
+			t.Fatal(a)
+		}
+	}
+	c, e = Parse(nil)
+	if e != nil || c.Lang != "vi" || c.Details || c.JSON {
+		t.Fatal(c, e)
+	}
+}

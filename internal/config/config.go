@@ -14,10 +14,13 @@ type Config struct {
 	Preset, Path, Profile, Engine, Target, Bind, Output, Method, Size, FileSize, Window, Bitrate string
 	Workers, Duration, Warmup, Repetitions, Depth, Jobs, Port, Streams, Load, Sample, Packet     int
 	NonInteractive, ConfirmWrites, Direct, UDP, Reverse, Bidir, Precondition                     bool
+	Details, JSON                                                                                bool
+	Lang                                                                                         string
+	StabilityCV                                                                                  float64
 }
 
 func Defaults(p string) (Config, error) {
-	c := Config{Preset: p, Workers: int(math.Ceil(system.Detect().Capacity)), Duration: 10, Warmup: 2, Repetitions: 3, Profile: "randread-4k", Engine: "io_uring", Size: "256MiB", FileSize: "1GiB", Depth: 32, Jobs: 1, Port: 5201, Streams: 1, Load: 100, Sample: 1, Packet: 1400, Bind: "127.0.0.1", Output: "results", Method: "all", Bitrate: "100M", Direct: true}
+	c := Config{Lang: "vi", StabilityCV: 5, Preset: p, Workers: int(math.Ceil(system.Detect().Capacity)), Duration: 10, Warmup: 2, Repetitions: 3, Profile: "randread-4k", Engine: "io_uring", Size: "256MiB", FileSize: "1GiB", Depth: 32, Jobs: 1, Port: 5201, Streams: 1, Load: 100, Sample: 1, Packet: 1400, Bind: "127.0.0.1", Output: "results", Method: "all", Bitrate: "100M", Direct: true}
 	switch p {
 	case "quick":
 		c.Duration = 2
@@ -110,7 +113,7 @@ func Parse(args []string) (Config, error) {
 	for _, v := range []struct {
 		k string
 		p *string
-	}{{"path", &c.Path}, {"profile", &c.Profile}, {"ioengine", &c.Engine}, {"target", &c.Target}, {"bind", &c.Bind}, {"output", &c.Output}, {"method", &c.Method}, {"size", &c.Size}, {"file-size", &c.FileSize}, {"window", &c.Window}, {"bitrate", &c.Bitrate}} {
+	}{{"path", &c.Path}, {"profile", &c.Profile}, {"ioengine", &c.Engine}, {"target", &c.Target}, {"bind", &c.Bind}, {"output", &c.Output}, {"method", &c.Method}, {"size", &c.Size}, {"file-size", &c.FileSize}, {"window", &c.Window}, {"bitrate", &c.Bitrate}, {"lang", &c.Lang}} {
 		f.StringVar(v.p, v.k, *v.p, v.k)
 	}
 	for _, v := range []struct {
@@ -122,9 +125,17 @@ func Parse(args []string) (Config, error) {
 	for _, v := range []struct {
 		k string
 		p *bool
-	}{{"non-interactive", &c.NonInteractive}, {"confirm-writes", &c.ConfirmWrites}, {"direct", &c.Direct}, {"udp", &c.UDP}, {"reverse", &c.Reverse}, {"bidir", &c.Bidir}, {"precondition", &c.Precondition}} {
+	}{{"non-interactive", &c.NonInteractive}, {"confirm-writes", &c.ConfirmWrites}, {"direct", &c.Direct}, {"udp", &c.UDP}, {"reverse", &c.Reverse}, {"bidir", &c.Bidir}, {"precondition", &c.Precondition}, {"details", &c.Details}, {"json", &c.JSON}} {
 		f.BoolVar(v.p, v.k, *v.p, v.k)
 	}
+	f.Func("stability-cv", "presentation CV threshold in percent (not a speed ranking)", func(value string) error {
+		v, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100 {
+			return fmt.Errorf("must be between 0 and 100 percent")
+		}
+		c.StabilityCV = v
+		return nil
+	})
 	if e = f.Parse(append(fromFile, args...)); e != nil {
 		return c, e
 	}
@@ -134,6 +145,15 @@ func Parse(args []string) (Config, error) {
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
+	if c.Lang != "vi" && c.Lang != "en" {
+		return fmt.Errorf("--lang must be vi or en")
+	}
+	if c.Details && c.JSON {
+		return fmt.Errorf("--details and --json are mutually exclusive")
+	}
+	if math.IsNaN(c.StabilityCV) || math.IsInf(c.StabilityCV, 0) || c.StabilityCV < 0 || c.StabilityCV > 100 {
+		return fmt.Errorf("--stability-cv must be between 0 and 100 percent")
+	}
 	if c.Sample != 1 {
 		return fmt.Errorf("live sampling interval is not implemented; use default 1 and complete-execution telemetry")
 	}

@@ -57,6 +57,15 @@ Build the CLI: `go build ./cmd/vmbench`. Linux native kernel: `cc -O2 -fno-fast-
 ./vmbench full test --preset precision --path /data --non-interactive
 ```
 
+Benchmark results default to a compact Vietnamese summary. Use `--lang en` for English, `--details` for technical tables, or `--json` for the complete report as JSON on stdout. Progress and diagnostics go to stderr. Every benchmark still saves its full report; `--details` and `--json` are mutually exclusive. See [output rules](docs/PRESENTATION.md) and [illustrative summaries](docs/RESULT_EXAMPLES.md).
+
+```bash
+./vmbench cpu test --preset quick --lang en
+./vmbench ram test --details --lang vi
+./vmbench disk test --path /data --json > disk-report.json
+./vmbench full test --path /data --lang en --stability-cv 5
+```
+
 No arguments opens a command prompt. Bare component commands prompt for worker count, duration, warmup and repetitions. Enter accepts defaults. Flags enable noninteractive use. `--config config/default.yaml` accepts a deliberately restricted flat YAML scalar mapping; nested YAML is rejected. Precedence: CLI > file > preset > defaults. Seconds are integers; sizes support bytes, KiB, MiB, GiB.
 
 Quick: 1s warmup, 2s per workload, one repetition. Standard: 2s warmup, 10s per workload, three repetitions. Precision: 5s warmup, 30s per workload, five repetitions. CPU and RAM run separately with one and requested worker counts. RAM total dataset is divided into three arrays and partitioned between workers. Each CPU unit means one defined recurrence iteration, not a universal operation or score. Floating-point contraction/compiler/platform changes may affect comparability.
@@ -67,9 +76,9 @@ Disk uses exclusive file creation and anchored directory descriptors, never raw 
 
 Network defaults to loopback server bind; explicitly select an interface for peers. Use trusted networks. iperf3 throughput is not forwarding PPS. Its raw end/interval data preserves UDP jitter/loss and TCP metrics. Missing peer skips network. No independent RTT probe is implemented.
 
-Reports under `results/` contain workload, metadata, raw results, warnings, failures and elapsed time. No ANSI escape sequences are emitted, so NO_COLOR and redirected terminals work. No sysctl/governor/cache tuning occurs.
+Reports under `results/` contain workload, metadata, raw results, warnings, failures and elapsed time. Human output uses aligned text tables with optional status colors on suitable interactive terminals. `NO_COLOR`, redirected output and `TERM=dumb` disable colors. Green indicates successful execution only. No sysctl/governor/cache tuning occurs.
 
 ## Validation and limitations
 Run `go test ./...`. Release: `bash scripts/build.sh`; see docs/BUILD.md for incomplete third-party build prerequisites. The Go CLI and native kernel were cross-compiled for Linux; Go unit tests and Windows help/version were executed on this Windows host. Linux native kernels, real fio/stress-ng/iperf3 runs, cancellation of engine trees and Ubuntu offline compatibility remain unexecuted. Missing engines fail explicitly.
 
-Still incomplete: detailed live telemetry sampling, cgroup v1 support, ancestor memory-usage accounting, thermal readings and detailed NUMA policy, NUMA policy, block-device metadata, progress bars, terminal metric tables, native trusted reference fixtures, user-adjustable disk block sizes/headroom/data patterns, steady-state and time-series checks, network summary statistics/RTT, qualified Linux third-party engine builds and complete transitive license audit. Do not use current output as acceptance evidence for infrastructure.
+Still incomplete: detailed live telemetry sampling, cgroup v1 support, ancestor memory-usage accounting, thermal readings and detailed NUMA policy, block-device metadata, percentage progress, native trusted reference fixtures, user-adjustable disk block sizes/headroom/data patterns, steady-state and time-series checks, independent network RTT measurement, qualified Linux third-party engine builds and complete transitive license audit. Summary assessments describe recorded observations and do not qualify hardware or rank speed. Do not use current output as acceptance evidence for infrastructure.

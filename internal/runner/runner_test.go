@@ -59,3 +59,18 @@ func TestTimeoutAndCancel(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestObserverBoundaryAndArgumentIsolation(t *testing.T) {
+	args := []string{"--version"}
+	events := []Event{}
+	ctx := WithObserver(context.Background(), func(event Event) {
+		events = append(events, event)
+		if len(event.Args) > 0 {
+			event.Args[0] = "modified by callback"
+		}
+	})
+	_, err := Run(ctx, "not-an-installed-engine", args, time.Second)
+	if err == nil || len(events) != 2 || !events[0].Starting || events[1].Starting || events[1].Error == nil || args[0] != "--version" {
+		t.Fatal(events, args, err)
+	}
+}

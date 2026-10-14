@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"strconv"
 	"time"
 	"vmbench/internal/config"
@@ -55,11 +57,14 @@ func Run(ctx context.Context, c config.Config) (Result, error) {
 	}
 	return Parse(b)
 }
-func Server(ctx context.Context, c config.Config) error {
+func Server(ctx context.Context, c config.Config) error { return ServerOutput(ctx, c, os.Stdout) }
+
+// ServerOutput changes only the destination of the listening notice.
+func ServerOutput(ctx context.Context, c config.Config, output io.Writer) error {
 	if net.ParseIP(c.Bind) == nil {
 		return fmt.Errorf("bind must be a literal IP address")
 	}
-	fmt.Printf("Listening on %s:%d. Use trusted benchmark networks only.\n", c.Bind, c.Port)
+	fmt.Fprintf(output, "Listening on %s:%d. Use trusted benchmark networks only.\n", c.Bind, c.Port)
 	_, e := runner.Run(ctx, "iperf3", []string{"-s", "-B", c.Bind, "-p", strconv.Itoa(c.Port)}, 24*time.Hour)
 	return e
 }

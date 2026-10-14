@@ -18,6 +18,7 @@ import (
 	"vmbench/internal/benchmark/memory"
 	"vmbench/internal/benchmark/network"
 	"vmbench/internal/config"
+	"vmbench/internal/presentation"
 	"vmbench/internal/report"
 	"vmbench/internal/runner"
 	"vmbench/internal/system"
@@ -35,6 +36,7 @@ Flags: --version|-v | --help
        --ioengine io_uring|libaio --iodepth N --numjobs N --target IP
        --bind IP --port N --streams N --udp --bitrate 100M --reverse --bidir
        --output results
+       --details | --json --lang vi|en --stability-cv 5
 `
 
 func helpText() string { return "VMBench " + version.Current() + helpBody }
@@ -71,6 +73,9 @@ func run() error {
 	}
 	c, e := config.Parse(a[2:])
 	if e != nil {
+		if c.JSON {
+			return failureReport(command, c, e)
+		}
 		return e
 	}
 	if command == "system info" {
@@ -79,7 +84,11 @@ func run() error {
 		return nil
 	}
 	if runtime.GOOS != "linux" {
-		return fmt.Errorf("benchmark execution requires Linux; this build supports help/version only")
+		e = fmt.Errorf("benchmark execution requires Linux; this build supports help/version only")
+		if c.JSON {
+			return failureReport(command, c, e)
+		}
+		return e
 	}
 	if len(a) == 2 && !c.NonInteractive {
 		fmt.Printf("CPU: %s; available capacity %.2f\n", system.Detect().CPUModel, system.Detect().Capacity)
@@ -116,11 +125,17 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if command == "network server" {
-		return network.Server(ctx, c)
-	}
 	r := report.New(command, c)
 	telemetryStart := system.Counters()
+	states := map[string]string{}
+	if command == "full test" {
+		for _, cmd := range []string{"cpu test", "ram test", "disk test", "network test"} {
+			states[cmd] = "not_run"
+		}
+	}
+	r.Results["execution_status"] = states
+	progress := presentation.Progress{Writer: os.Stderr, Lang: c.Lang, Interactive: presentation.ColorEnabled(os.Stderr)}
+	ctx = runner.WithObserver(ctx, progress.Observe)
 	if c.Preset == "quick" {
 		r.Warnings = append(r.Warnings, "Preliminary workload; unsuitable for rigorous cross-platform comparisons")
 	}
@@ -132,7 +147,9 @@ func run() error {
 		}
 	}
 	execute := func(cmd string) error {
-		fmt.Printf("\n%-24s RUNNING\n", strings.ToUpper(cmd))
+		progress.Start(cmd)
+		states[cmd] = "running"
+		defer func() { progress.Finish(states[cmd]) }()
 		var err error
 		switch cmd {
 		case "cpu test":
@@ -145,6 +162,7 @@ func run() error {
 			r.Warnings = append(r.Warnings, "Read tests also write dataset initialization. Direct I/O does not bypass all storage caches. Benchmark files limited to selected size.")
 			metadata, x := system.Filesystem(c.Path)
 			if x != nil {
+				states[cmd] = "failed"
 				return x
 			}
 			r.Results["filesystem"] = metadata
@@ -155,9 +173,12 @@ func run() error {
 			r.Results[cmd] = res
 			r.Results["fio_raw"] = raw
 			err = x
+		case "network server":
+			err = network.ServerOutput(ctx, c, os.Stderr)
 		case "network test":
 			if c.Target == "" {
 				r.Warnings = append(r.Warnings, "Network skipped: no peer configured")
+				states[cmd] = "skipped"
 				return nil
 			}
 			var observations []network.Result
@@ -170,6 +191,10 @@ func run() error {
 				observations = append(observations, value)
 			}
 			r.Results[cmd] = observations
+		}
+		states[cmd] = "completed"
+		if err != nil {
+			states[cmd] = "failed"
 		}
 		return err
 	}
@@ -188,6 +213,7 @@ func run() error {
 			summaries, x := cpu.Summarize(raw)
 			if x != nil && e == nil {
 				e = x
+				states[key] = "failed"
 			}
 			sort.Slice(summaries, func(i, j int) bool {
 				if summaries[i].Workload == summaries[j].Workload {
@@ -196,10 +222,8 @@ func run() error {
 				return summaries[i].Workload < summaries[j].Workload
 			})
 			r.Results[key+"_statistics"] = summaries
-			fmt.Printf("\n%-28s %7s %14s %10s\n", "WORKLOAD", "WORKERS", "MEDIAN", "CV")
-			for _, s := range summaries {
-				fmt.Printf("%-28s %7d %14.4f %9.2f%% %s\n", s.Workload, s.Workers, s.Statistics.Median, s.Statistics.CV*100, s.Unit)
-				r.Warnings = append(r.Warnings, s.Warnings...)
+			for _, summary := range summaries {
+				r.Warnings = append(r.Warnings, summary.Warnings...)
 			}
 		}
 	}
@@ -209,15 +233,30 @@ func run() error {
 		r.Status = "failed"
 		r.Errors = append(r.Errors, e.Error())
 	}
-	p, se := r.Save()
-	b, _ := json.MarshalIndent(r.Results, "", "  ")
-	fmt.Println(string(b))
-	for _, w := range r.Warnings {
-		fmt.Println("WARNING:", w)
+	r.Warnings = append(r.Warnings, presentation.GeneratedWarnings(r)...)
+	return finishReport(r, e)
+}
+
+func failureReport(command string, c config.Config, cause error) error {
+	r := report.New(command, c)
+	r.Status = "failed"
+	r.Errors = append(r.Errors, cause.Error())
+	r.Results["execution_status"] = map[string]string{command: "failed"}
+	return finishReport(r, cause)
+}
+
+func finishReport(r report.Report, cause error) error {
+	p, saveErr := r.Save()
+	if saveErr != nil {
+		r.Status = "failed"
+		r.Errors = append(r.Errors, "report: "+saveErr.Error())
+		p = ""
 	}
-	fmt.Printf("Status: %s | Elapsed: %.2fs | Report: %s\n", r.Status, r.DurationSeconds, p)
-	if se != nil {
-		return se
+	if renderErr := presentation.Render(os.Stdout, r, p, presentation.ColorEnabled(os.Stdout)); renderErr != nil {
+		return renderErr
 	}
-	return e
+	if saveErr != nil {
+		return saveErr
+	}
+	return cause
 }

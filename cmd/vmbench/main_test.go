@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"vmbench/internal/report"
 	"vmbench/internal/version"
 )
 
@@ -76,6 +77,40 @@ func TestComponentsStillValidateParameters(t *testing.T) {
 			_, stderr, err := invokeCLI(t, args...)
 			if err == nil || !strings.Contains(stderr, "parameter outside supported limits") {
 				t.Fatalf("exit=%v stderr=%q", err, stderr)
+			}
+		})
+	}
+}
+
+func TestJSONFailureStdoutAndSavedReport(t *testing.T) {
+	dir := t.TempDir()
+	out, stderr, err := invokeCLI(t, "cpu", "test", "--json", "--duration", "0", "--output", dir)
+	if err == nil {
+		t.Fatal("invalid duration succeeded")
+	}
+	var r report.Report
+	if e := json.Unmarshal([]byte(out), &r); e != nil {
+		t.Fatalf("stdout is not JSON: %s (%v)", out, e)
+	}
+	if r.Status != "failed" || len(r.Errors) == 0 || !strings.Contains(stderr, "parameter outside supported limits") {
+		t.Fatal(r, stderr)
+	}
+	files, e := os.ReadDir(dir)
+	if e != nil || len(files) != 1 {
+		t.Fatal(files, e)
+	}
+	if strings.Contains(out, "Preparing workload") || strings.Contains(out, "WARNING:") {
+		t.Fatal("stdout polluted", out)
+	}
+}
+
+func TestJSONRejectsNonFinitePresentationThreshold(t *testing.T) {
+	for _, value := range []string{"NaN", "+Inf", "-Inf"} {
+		t.Run(value, func(t *testing.T) {
+			out, stderr, err := invokeCLI(t, "cpu", "test", "--json", "--output", t.TempDir(), "--stability-cv", value)
+			var r report.Report
+			if err == nil || json.Unmarshal([]byte(out), &r) != nil || r.Status != "failed" || !strings.Contains(stderr, value) {
+				t.Fatalf("non-finite threshold did not yield valid failure JSON: %q %q %v", out, stderr, err)
 			}
 		})
 	}

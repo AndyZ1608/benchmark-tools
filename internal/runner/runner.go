@@ -22,10 +22,10 @@ func Engine(name string) (string, error) {
 	return p, nil
 }
 func Run(ctx context.Context, name string, args []string, timeout time.Duration) ([]byte, error) {
-	return run(ctx, name, args, timeout, false)
+	return observedRun(ctx, name, args, timeout, false)
 }
 func RunText(ctx context.Context, name string, args []string, timeout time.Duration) ([]byte, error) {
-	return run(ctx, name, args, timeout, true)
+	return observedRun(ctx, name, args, timeout, true)
 }
 func run(ctx context.Context, name string, args []string, timeout time.Duration, combined bool) ([]byte, error) {
 	p, e := Engine(name)
