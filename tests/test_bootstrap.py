@@ -81,6 +81,58 @@ if [[ ${{FIXTURE_GO_TEST_FAIL:-0}} == 1 ]]; then echo 'FAIL: injected Go unit te
         return result
     def calls(self):
         p=self.base/'calls';return p.read_text() if p.exists() else ''
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('git'), 'requires Linux executable modes and real Git')
+    def test_clone_install_rebuild_and_fast_forward_keep_git_clean(self):
+        # Real Git is used by the harness only; installer calls still hit the
+        # failing git fixture, so accidental Git-based cleanup cannot pass.
+        git=shutil.which('git')
+        def run_git(directory,*args):
+            result=subprocess.run([git,'-c','core.autocrlf=false','-c','user.name=Bootstrap Test','-c','user.email=bootstrap@example.invalid',*args],cwd=directory,text=True,capture_output=True,timeout=30)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            return result.stdout
+        shutil.copy2(REPO/'.gitignore',self.root/'.gitignore')
+        upstream=self.base/'upstream';self.root.rename(upstream)
+        run_git(upstream,'init')
+        run_git(upstream,'add','.')
+        run_git(upstream,'update-index','--chmod=+x','init.sh','start.sh')
+        run_git(upstream,'commit','-m','Initial fixture')
+        run_git(self.base,'clone',str(upstream),str(self.root))
+        for script in ['init.sh','start.sh']:
+            self.assertTrue(os.access(self.root/script,os.X_OK))
+            self.assertTrue(run_git(self.root,'ls-files','--stage',script).startswith('100755 '))
+        def direct(script,*args):
+            result=subprocess.run([str(self.root/script),*args],cwd=self.root,env=self.env,stdin=subprocess.DEVNULL,text=True,capture_output=True,timeout=90)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        direct('start.sh')
+        self.assertEqual(run_git(self.root,'status','--short'),'')
+        config=self.root/'.vmbench/auto.yaml';config.write_text('# user settings\n')
+        direct('init.sh','--rebuild')
+        self.assertEqual(run_git(self.root,'status','--short'),'')
+        # Pull changes to both startup scripts and Go source, then verify the
+        # normal startup path rebuilds once and reuses unchanged engines.
+        for name in ['init.sh','start.sh']:
+            with (upstream/name).open('a') as f:f.write('\n# upstream update\n')
+        (upstream/'cmd/vmbench/main.go').write_text('package main // upstream update\n')
+        run_git(upstream,'add','.')
+        run_git(upstream,'commit','-m','Update startup and CLI source')
+        run_git(self.root,'pull','--ff-only')
+        before=self.calls();direct('start.sh','--help')
+        self.assertIn('cli-build',self.calls()[len(before):])
+        self.assertNotIn('network-or-install',self.calls())
+        before=self.calls();direct('start.sh','--help')
+        self.assertEqual(self.calls(),before)
+        self.assertEqual(run_git(self.root,'status','--short'),'')
+        self.assertEqual(config.read_text(),'# user settings\n')
+        # Local edits remain owned by the user, even during a forced rebuild.
+        script=self.root/'start.sh'
+        content=script.read_bytes()+b'\n# my local customization\n'
+        script.write_bytes(content)
+        notes=self.root/'my-notes.txt';notes.write_text('keep my data\n')
+        direct('init.sh','--rebuild')
+        self.assertEqual(script.read_bytes(),content)
+        self.assertEqual(notes.read_text(),'keep my data\n')
+        self.assertEqual(config.read_text(),'# user settings\n')
+        self.assertIn(' M start.sh',run_git(self.root,'status','--short'))
     def first(self):return self.run_script(args=['--offline','--help'])
     def prebuilts(self):
         (self.root/'engines').mkdir(exist_ok=True)

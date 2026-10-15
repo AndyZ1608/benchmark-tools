@@ -2,6 +2,7 @@
 results/
 dist/
 *.exe
+# Installation state, logs, downloaded sources, toolchains and local configuration.
 .vmbench/
 .build/
 vendor-engines/
@@ -9,3 +10,6 @@ vendor-engines/
 /engines/
 __pycache__/
 *.pyc
+# Generated local/CI compatibility evidence.
+/compatibility-result.json
+/compatibility-results/

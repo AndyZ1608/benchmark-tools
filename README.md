@@ -51,14 +51,16 @@ git clone https://github.com/AndyZ1608/benchmark-tools.git
 
 cd benchmark-tools
 
-chmod +x init.sh start.sh
-
 ./start.sh
 ```
 
 If `-bash: ./start.sh: Permission denied` appears because the executable bit is missing, run `chmod +x init.sh start.sh`. The scripts are tracked as executable in Git. `bash start.sh` is an alternative when executable permission cannot be set; mount `noexec` or directory permission restrictions may require a different location. Source installation requires Bash and standard Linux shell utilities. First launch detects the host, obtains missing dependencies after approval, selects a compatible Go toolchain, builds the CLI/native engine, checks engines, runs Go tests when building the CLI, and commits installation state after validation. Initialization does not run stress benchmarks.
 
 Later launches reuse unchanged components. In a source checkout, use `./start.sh` after `git pull` to rebuild changed code. Direct `./vmbench` runs the existing executable independently and cannot rebuild itself.
+
+Update a clean checkout with `git pull --ff-only`, then run `./start.sh`. Initialization and rebuilding must not modify Git-tracked scripts or other source files. Both startup scripts have Git mode `100755`; older revisions used `100644`, so a manual `chmod` could leave local changes that blocked a pull. Review existing local changes with `git diff --summary` and `git diff` before updating; the installer never resets, checks out, or stashes user changes.
+
+Installation state, logs, downloaded sources, caches, toolchains, and local configuration belong under the ignored `.vmbench/` directory. Executables (`vmbench`, `engines/`) and build/release outputs (`.build/`, `vendor-engines/`, `dist/`) are also ignored. Tracked `third-party/` archives and `config/` examples are read-only installation inputs. Put automatic-mode overrides in `.vmbench/auto.yaml` instead of editing the tracked examples. Rebuilding preserves local configuration and user data.
 
 The main menu has four components and Exit. A component opens its QUICK / STANDARD / MAX submenu; `0` returns to the main menu. Invalid choices retry without starting work. After a benchmark, choose Back to Main Menu or Exit. EOF and Ctrl+C end the session; active child processes are stopped and disk cleanup finishes before exit.
 

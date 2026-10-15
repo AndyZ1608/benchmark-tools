@@ -31,13 +31,14 @@ cp -R "$ROOT/vendor-engines/LICENSES/." "$output/LICENSES/"
 # Preserve the recorded build's runtime sources/notices. This never downloads.
 if [[ -f $ROOT/scripts/runtime-sources.lock.json && -d $ROOT/third-party/runtime ]]; then
     python3 "$ROOT/scripts/fetch-runtime-sources.py" --offline
-    cp -R "$ROOT/third-party/runtime" "$output/LICENSES/runtime"
+    mkdir -p "$output/LICENSES/runtime"
+    cp -R "$ROOT/.vmbench/cache/runtime-sources/." "$output/LICENSES/runtime/"
 fi
 mkdir -p "$output/LICENSES/rebuild/scripts/install"
 cp "$ROOT/scripts/build-engines.sh" "$ROOT/scripts/fetch-engines.py" "$ROOT/scripts/engines.lock.json" "$ROOT/scripts/bootstrap-common.sh" "$output/LICENSES/rebuild/scripts/"
 cp "$ROOT/scripts/install/"*.sh "$output/LICENSES/rebuild/scripts/install/"
 cp "$ROOT/scripts/runtime-sources.lock.json" "$ROOT/scripts/fetch-runtime-sources.py" "$output/LICENSES/rebuild/scripts/"
-python3 - "$ROOT/third-party/iperf3.tar.gz" "$output/LICENSES/iperf3/cJSON-LICENSE" <<'PY'
+python3 - "$output/LICENSES/iperf3.tar.gz" "$output/LICENSES/iperf3/cJSON-LICENSE" <<'PY'
 import sys,tarfile,pathlib
 with tarfile.open(sys.argv[1]) as archive:
     member=next(m for m in archive.getmembers() if m.isfile() and m.name.endswith('/src/cjson.c'))

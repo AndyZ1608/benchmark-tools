@@ -10,7 +10,7 @@ args=parser.parse_args();out=root/'dist';out.mkdir(exist_ok=True)
 items=[]
 for name in ['cmd','internal','native','scripts','tests','docs','config','LICENSES','third-party']:
  items.extend(p for p in (root/name).rglob('*') if p.is_file() and '__pycache__' not in p.parts)
-items.extend(root/name for name in ['go.mod','README.md','VERSION','LICENSE','BUILD_STATUS.md','init.sh','start.sh'])
+items.extend(root/name for name in ['.gitignore','.gitattributes','go.mod','README.md','VERSION','LICENSE','BUILD_STATUS.md','init.sh','start.sh'])
 label='source';binaries=[]
 if args.binaries_dir:
  for name in ['vmbench','engines/compute-bench']:

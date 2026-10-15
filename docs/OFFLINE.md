@@ -18,6 +18,8 @@ bash scripts/build.sh --candidate                # local qualification only
 
 Engine inputs are pinned fio 3.39, stress-ng 0.18.10 and iperf3 3.17.1. Fetching verifies SHA-256 and stops on mismatch. It does not establish upstream signature provenance. fio is built static without native CPU tuning and requires libaio support; stress-ng is static with detected features and baseline target flags (upstream may append optimization flags); iperf3 is static without OpenSSL authentication. Use trusted benchmark networks. Baseline native targets are x86-64 or ARMv8-A, never march=native. Native floating-point contraction is disabled for consistent calculation semantics.
 
+Source preparation reads checked-in `third-party/` inputs without changing them. Downloads, verified engine copies, and generated runtime notices are stored under the ignored `.vmbench/cache/engine-sources/` and `.vmbench/cache/runtime-sources/` directories. Offline builds can reuse these caches when corresponding checked-in archives are absent; a checksum mismatch still stops the build and leaves local inputs untouched.
+
 Build output is staged under `dist/ARCH-LIBC/vmbench`. `scripts/release.py` verifies ELF64 machine, rejects PT_INTERP/DT_NEEDED, executes version/doctor checks, verifies source archives/licenses and exact engine build hashes, and writes release-manifest.json plus archive SHA-256. `LICENSES/engine-build.json` records architecture/libc/compiler/flags/hashes; feature/configuration files accompany engine sources. No packaging step downloads dependencies.
 
 ## Redistribution gate

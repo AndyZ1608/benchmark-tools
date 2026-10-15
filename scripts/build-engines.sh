@@ -14,12 +14,13 @@ case $GO_ARCH in amd64) export CFLAGS='-O2 -march=x86-64 -mtune=generic';; arm64
 export LC_ALL=C
 
 python3 scripts/fetch-engines.py --offline
+SOURCE_CACHE="$ROOT/.vmbench/cache/engine-sources"
 context=$(printf '%s\n' "$GO_ARCH" "$LIBC" "$LIBC_VERSION" "$CFLAGS" "$("$CC" --version)" "$(hash_file scripts/engines.lock.json)" "$(hash_file scripts/build-engines.sh)" | sha256sum | cut -c1-16)
 BUILD_ROOT="$ROOT/.build/engines/$GO_ARCH-$LIBC-$context"
 mkdir -p "$BUILD_ROOT" vendor-engines/LICENSES
 for name in fio stress-ng iperf3; do
   mkdir -p "$BUILD_ROOT/$name"
-  tar --extract --gzip --file="third-party/$name.tar.gz" --directory="$BUILD_ROOT/$name" --strip-components=1
+  tar --extract --gzip --file="$SOURCE_CACHE/$name.tar.gz" --directory="$BUILD_ROOT/$name" --strip-components=1
  done
 (
  cd "$BUILD_ROOT/fio"
@@ -42,7 +43,7 @@ cp "$BUILD_ROOT/iperf3/src/iperf3" vendor-engines/iperf3
 cp -R LICENSES/. vendor-engines/LICENSES/
 # Preserve source and build settings to meet upstream source redistribution obligations.
 cp scripts/engines.lock.json vendor-engines/LICENSES/
-cp third-party/*.tar.gz vendor-engines/LICENSES/
+cp "$SOURCE_CACHE/"*.tar.gz vendor-engines/LICENSES/
 # Capture exactly which binaries and build inputs were used, including feature detection.
 cp "$BUILD_ROOT/fio/config-host.mak" vendor-engines/LICENSES/fio-build-config.txt
 cp "$BUILD_ROOT/stress-ng/config" vendor-engines/LICENSES/stress-ng-build-config.txt
