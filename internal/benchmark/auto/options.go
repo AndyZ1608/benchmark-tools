@@ -16,7 +16,8 @@ import (
 )
 
 type Options struct {
-	Mode, DiskPath, NetworkPeer, ConfigFile                                        string
+	Component                                                                      string // Empty retains the legacy combined-run behavior.
+	Mode, DiskPath, NetworkPeer, ConfigFile, DiskEngine                            string
 	NonInteractive, AckMax, IncludeWrites, ConfirmWrites, Details                  bool
 	MaxWorkers, MaxDepth, MaxJobs, MaxOutstanding, MaxStreams, SampleSeconds, Port int
 	MaxRAM, MaxDisk, MinFree, NetworkBitrate                                       string
@@ -25,10 +26,14 @@ type Options struct {
 }
 
 func Defaults(mode string) Options {
-	return Options{Mode: mode, MaxWorkers: 32, MaxDepth: 64, MaxJobs: 4, MaxOutstanding: 128, MaxStreams: 8, MaxRAM: "2GiB", MaxDisk: "2GiB", MinFree: "1GiB", MaxDuration: 30 * time.Minute, MaxCV: .10, Improvement: .05, Port: 5201, NetworkBitrate: "1G"}
+	return Options{Mode: mode, DiskEngine: "auto", MaxWorkers: 32, MaxDepth: 64, MaxJobs: 4, MaxOutstanding: 128, MaxStreams: 8, MaxRAM: "2GiB", MaxDisk: "2GiB", MinFree: "1GiB", MaxDuration: 30 * time.Minute, MaxCV: .10, Improvement: .05, Port: 5201, NetworkBitrate: "1G"}
 }
 func Parse(mode string, args []string) (Options, error) {
+	return ParseComponent("", mode, args)
+}
+func ParseComponent(component, mode string, args []string) (Options, error) {
 	o := Defaults(mode)
+	o.Component = component
 	if mode != "quick" && mode != "standard" && mode != "max" {
 		return o, fmt.Errorf("unknown automatic mode %q", mode)
 	}
@@ -69,10 +74,16 @@ func Parse(mode string, args []string) (Options, error) {
 	}
 	f := flag.NewFlagSet(mode, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	if component == "disk" {
+		f.StringVar(&o.DiskPath, "path", o.DiskPath, "existing disk target directory")
+	}
+	if component == "network" {
+		f.StringVar(&o.NetworkPeer, "target", o.NetworkPeer, "remote server IP")
+	}
 	for _, v := range []struct {
 		name string
 		p    *string
-	}{{"disk-path", &o.DiskPath}, {"network-peer", &o.NetworkPeer}, {"config", &o.ConfigFile}, {"max-ram", &o.MaxRAM}, {"max-disk-data", &o.MaxDisk}, {"min-free-disk", &o.MinFree}, {"network-bitrate", &o.NetworkBitrate}} {
+	}{{"ioengine", &o.DiskEngine}, {"disk-path", &o.DiskPath}, {"network-peer", &o.NetworkPeer}, {"config", &o.ConfigFile}, {"max-ram", &o.MaxRAM}, {"max-disk-data", &o.MaxDisk}, {"min-free-disk", &o.MinFree}, {"network-bitrate", &o.NetworkBitrate}} {
 		f.StringVar(v.p, v.name, *v.p, v.name)
 	}
 	for _, v := range []struct {
@@ -96,9 +107,29 @@ func Parse(mode string, args []string) (Options, error) {
 	if len(f.Args()) > 0 {
 		return o, fmt.Errorf("unexpected automatic mode arguments: %v", f.Args())
 	}
+	// Shared configuration may contain endpoints for other components. They must
+	// neither trigger work nor require unrelated acknowledgments in a scoped run.
+	if component != "" && component != "disk" {
+		o.DiskPath, o.IncludeWrites, o.ConfirmWrites = "", false, false
+		o.DiskEngine = "auto"
+	}
+	if component != "" && component != "network" {
+		o.NetworkPeer = ""
+	}
 	return o, o.Validate()
 }
+func (o Options) Selects(module string) bool {
+	return o.Component == "" || strings.ToUpper(o.Component) == module || o.Component == "ram" && module == "MEMORY"
+}
 func (o Options) Validate() error {
+	if o.DiskEngine != "auto" && o.DiskEngine != "io_uring" && o.DiskEngine != "libaio" {
+		return fmt.Errorf("Disk ioengine must be auto, io_uring or libaio")
+	}
+	switch o.Component {
+	case "", "cpu", "ram", "disk", "network":
+	default:
+		return fmt.Errorf("unknown benchmark component %q", o.Component)
+	}
 	if o.Mode != "quick" && o.Mode != "standard" && o.Mode != "max" {
 		return fmt.Errorf("unknown automatic mode %q", o.Mode)
 	}

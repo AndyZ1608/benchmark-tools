@@ -2,13 +2,7 @@
 
 Portable Linux VM Performance Benchmark CLI
 
-VMBench measures CPU, memory, disk and network performance with three commands:
-
-```bash
-./vmbench quick
-./vmbench standard
-./vmbench max
-```
+VMBench measures CPU, memory, disk and network performance. Run `./start.sh`, select **CPU, RAM, DISK or NETWORK**, then select **QUICK, STANDARD or MAX**. Each selection runs only that component.
 
 Benchmark execution is offline: it uses local engines and optional trusted network peers. Source initialization can install missing dependencies with approval. A complete binary bundle needs neither a compiler nor Go. Current distribution qualification and release limitations are stated below; recognition by the installer does not certify a platform.
 
@@ -32,7 +26,7 @@ The installation adapters below are implemented. The CI workflow attempts repres
 | Ubuntu | 22.04, 24.04 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | apt |
 | Debian | 12, 13 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | apt |
 | Rocky Linux, AlmaLinux | 9, 10 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | dnf; enabled repositories only |
-| RHEL, CentOS Stream | 9, 10 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | RHEL requires valid repository access |
+| RHEL, CentOS Stream | 9, 10 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | RHEL requires valid repository access; 9.6 compilation reported, functional Disk validation pending |
 | Fedora | Image-selected release | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | No lifecycle/support assertion for arbitrary releases |
 | openSUSE Leap/Tumbleweed, SLES | Image-selected/installed version | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | zypper; SLES repository access required |
 | Arch Linux | Rolling | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | Existing synchronized package metadata; no automatic OS upgrade |
@@ -40,17 +34,35 @@ The installation adapters below are implemented. The CI workflow attempts repres
 
 ARM64 is experimental: portable C and Go targets are implemented; native ARM64 execution is not verified. Unknown IDs and derivatives are rejected for automatic installation even if `ID_LIKE` names a known family. Windows is a development/test host only, not a benchmark target.
 
+## RHEL and asynchronous Disk capability
+
+The reported RHEL 9.6 host (kernel `5.14.0-570.12.1.el9_6.x86_64`, glibc 2.34, Go 1.23.12, fio 3.35, stress-ng 0.19.03, iperf3 3.9) built the engines but failed the old initialization capability gate. This is a user-reported build result, not completed functional Disk qualification. RHEL 9 systems may restrict io_uring through kernel/security policy; individual host settings and fio build options vary.
+
+Initialization requires healthy executable identities, architecture and runtime libraries. It reports async engines separately as `AVAILABLE_NOT_VALIDATED` or `UNAVAILABLE`: creating an AIO context is not proof of completed I/O. Missing Disk async capability does not block CPU, RAM or Network. Actual Disk setup requires an explicit directory and tests compiled candidates in this order: **io_uring, then libaio**. Only an engine that completes bounded direct reads with meaningful asynchronous depth can be selected. `--ioengine auto|io_uring|libaio` controls Disk selection in automatic commands. Explicit `--ioengine io_uring` never substitutes libaio; advanced `disk test` can opt into `--ioengine auto` (its existing default remains io_uring).
+
+The probe uses a private populated/synchronized 1MiB file, QD4 and at most 64 direct 4K reads per candidate, with a five-second execution deadline. Probe data and results are removed through the existing owned-file lifecycle and excluded from benchmark statistics. Every measurement must also report completed I/O counters and acceptable achieved depth. The selected engine and observed depth are displayed; nominal requested QD is not an achieved-QD claim. A failed measurement never triggers an engine switch midway through a run.
+
+The application reads policy and probes permission; it does not change `kernel.io_uring_disabled`, `kernel.io_uring_group`, SELinux, seccomp or other security settings, and does not ask for root to bypass restrictions. Disk availability depends on the fio build, runtime permissions and selected filesystem. No general RHEL 9 qualification is claimed. See [compatibility evidence](docs/COMPATIBILITY.md) and [Disk methodology](docs/DISK.md).
+
 ## Quick start
 
 ```bash
 git clone https://github.com/AndyZ1608/benchmark-tools.git
+
 cd benchmark-tools
+
+chmod +x init.sh start.sh
+
 ./start.sh
 ```
 
-Use `bash start.sh` if execute bits were lost. Source installation requires Bash and standard Linux shell utilities. First launch detects the host, obtains missing dependencies after approval, selects a compatible Go toolchain, builds the CLI/native engine, checks engines, runs Go tests when building the CLI, and commits installation state after validation. Initialization does not run stress benchmarks.
+If `-bash: ./start.sh: Permission denied` appears because the executable bit is missing, run `chmod +x init.sh start.sh`. The scripts are tracked as executable in Git. `bash start.sh` is an alternative when executable permission cannot be set; mount `noexec` or directory permission restrictions may require a different location. Source installation requires Bash and standard Linux shell utilities. First launch detects the host, obtains missing dependencies after approval, selects a compatible Go toolchain, builds the CLI/native engine, checks engines, runs Go tests when building the CLI, and commits installation state after validation. Initialization does not run stress benchmarks.
 
-Later launches reuse unchanged components. In a source checkout, use `./start.sh quick` after `git pull` to rebuild changed code. Direct `./vmbench` runs the existing executable independently and cannot rebuild itself.
+Later launches reuse unchanged components. In a source checkout, use `./start.sh` after `git pull` to rebuild changed code. Direct `./vmbench` runs the existing executable independently and cannot rebuild itself.
+
+The main menu has four components and Exit. A component opens its QUICK / STANDARD / MAX submenu; `0` returns to the main menu. Invalid choices retry without starting work. After a benchmark, choose Back to Main Menu or Exit. EOF and Ctrl+C end the session; active child processes are stopped and disk cleanup finishes before exit.
+
+CPU and RAM detect safe resource settings automatically. Disk asks for an existing writable directory and checks safety and free space; invalid paths can be retried or abandoned with `0`. No mount point is created or default system directory selected. Network asks for a trusted remote server IP if none is configured. It rejects loopback and this VM's own addresses, and displays the server command and port requirements.
 
 ## Benchmark commands
 
@@ -61,27 +73,41 @@ Later launches reuse unchanged components. In a source checkout, use `./start.sh
 | MAX | Highest validated observed performance within limits | Searches CPU/RAM concurrency, disk depth/jobs and optional network streams; confirms promising configurations |
 
 ```bash
-./start.sh quick
-./vmbench standard --disk-path /data
-./vmbench max --disk-path /data --network-peer 10.0.0.20
-# For unattended MAX, acknowledge this invocation explicitly:
-./vmbench max --non-interactive --ack-max --disk-path /data
+./start.sh cpu quick
+./vmbench cpu standard --non-interactive
+./vmbench cpu max --non-interactive --ack-max
+./vmbench ram quick --non-interactive
+./start.sh ram standard --non-interactive
+./vmbench ram max --non-interactive --ack-max
+./vmbench disk quick --path /data --non-interactive
+./vmbench disk standard --path /data --non-interactive
+./start.sh disk max --path /data --non-interactive --ack-max
+./vmbench network quick --target 10.0.0.20 --non-interactive
+./vmbench network standard --target 10.0.0.20 --non-interactive
+./vmbench network max --target 10.0.0.20 --non-interactive --ack-max
+# On the trusted remote server (replace SERVER_IP with its interface IP):
+./vmbench network server --bind SERVER_IP --port 5201 --non-interactive
 ```
 
-The directory must already exist. Without a selected directory Disk is skipped (interactive runs may prompt). Without a peer Network is skipped. Interactive MAX requires acknowledgment; `init.sh --yes` cannot grant benchmark permission. Optional disk write measurements need both `--include-writes --confirm-writes`. Read measurements still prepare real data by writing private files.
+All four components support all three modes, including through `start.sh`. Noninteractive Disk requires `--path`; Network requires `--target` (or their configured equivalents). Automatic network tests use TCP; allow the configured `--network-port` (default 5201) between hosts and start the server first. CPU and RAM require no endpoints, worker counts or dataset questions.
+
+Interactive MAX requires acknowledgment; `init.sh --yes` cannot grant benchmark permission. Unattended MAX requires `--ack-max`. Optional disk write measurements need both `--include-writes --confirm-writes`. Read measurements still prepare real data by writing private files. The menu does not enable optional write profiles.
+
+Legacy top-level `quick`, `standard` and `max` remain explicit combined runs for compatibility. They run CPU/RAM and any configured Disk/Network sequentially, skipping missing endpoints. They are absent from the main menu. For example: `./vmbench quick --disk-path /data --network-peer 10.0.0.20 --non-interactive`.
 
 MAX reports **Maximum Observed Performance**, not the physical maximum of the VM or host. Resource/time ceilings can truncate a search; unconfirmed results are labeled honestly.
 
 ## Installation
 
 ```bash
-bash init.sh                 # approved missing dependencies, then build/check
+./init.sh                   # direct initialization; approved missing dependencies, then build/check
+./init.sh --rebuild         # forced CLI/native rebuild, reusing valid dependencies
 bash init.sh --yes           # noninteractive authorization for listed packages only
 bash init.sh --offline       # local dependencies only; no downloads/package-manager calls
 bash init.sh --check         # read-only compatibility and existing dependency checks
 bash init.sh --rebuild       # rebuild CLI/native, reuse usable installed dependencies
 bash init.sh --verbose       # show build/test diagnostics
-bash start.sh --offline quick
+bash start.sh --offline cpu quick
 ```
 
 Engine resolution prefers a verified `vendor-engines/` bundle, then the installed `engines/` copy, then a compatible system executable. Versions, linkage and origin are recorded in `.vmbench/install-state.json`; rebuild output identifies selected engines. No extra repositories, subscription services, signature bypass, OS upgrades or reboots are requested. Packages unavailable from enabled repositories cause an actionable failure.
@@ -146,17 +172,18 @@ Abrupt machine/process termination can leave owned data and recovery metadata; u
 The following are **illustrative status excerpts**, not recorded measurements or complete console transcripts. No performance numbers are invented.
 
 ```text
-QUICK
-CPU - Completed
-RAM - Completed
-DISK - SKIPPED (no directory selected)
-NETWORK - SKIPPED (no remote peer)
+VMBENCH - CPU - QUICK PERFORMANCE
+CPU - COMPLETED
+Integer throughput
+FP throughput
 
-STANDARD
-CPU/RAM: repeated samples; summary includes dispersion
-Disk: dataset preparation, measurement and verified cleanup
+VMBENCH - RAM - STANDARD PERFORMANCE
+RAM - COMPLETED
+TRIAD bandwidth
+Memory latency
 
-MAX
+VMBENCH - DISK - MAX PERFORMANCE
+DISK - COMPLETED
 Maximum Observed IOPS (Random Read 4K)
 Best confirmed configuration and observed range
 Unconfirmed configurations remain labeled unconfirmed
@@ -164,20 +191,20 @@ Unconfirmed configurations remain labeled unconfirmed
 
 ## CLI reference
 
-`./vmbench --help`, `./vmbench --version`, `./vmbench -v`, `./vmbench version`, `./vmbench doctor`, and `./vmbench MODE --help` are safe queries. Running without arguments opens the mode menu.
+`./vmbench --help`, `./vmbench --version`, `./vmbench -v`, `./vmbench version`, `./vmbench doctor`, and `./vmbench COMPONENT MODE --help` are safe queries. Running without arguments opens component selection.
 
 Automatic flags:
 
 | Purpose | Flags |
 |---|---|
-| Targets/config | `--disk-path`, `--network-peer`, `--config`, `--details`, `--non-interactive` |
+| Targets/config | `--path` (Disk), `--target` (Network); aliases `--disk-path`, `--network-peer`; `--config`, `--details`, `--non-interactive` |
 | Authorization | `--ack-max`, `--include-writes`, `--confirm-writes` |
 | CPU/RAM | `--max-workers`, `--max-ram` |
 | Disk | `--max-disk-data`, `--min-free-disk`, `--max-disk-depth`, `--max-disk-jobs`, `--max-outstanding-io` |
 | Network | `--max-network-streams`, `--network-bitrate` |
 | Search/time | `--max-duration`, `--sample-seconds`, `--max-cv`, `--saturation-improvement` |
 
-Automatic YAML is flat; an explicit `--config` or caller `.vmbench/auto.yaml` is optional. `config/auto.yaml` is an example. Acknowledgments must be supplied per invocation.
+Automatic YAML is flat; an explicit `--config` or caller `.vmbench/auto.yaml` is optional. `config/auto.yaml` is an example. Acknowledgments must be supplied per invocation. Component commands ignore unrelated endpoints and write-profile settings from shared automatic configuration.
 
 Advanced commands remain: `cpu test`, `cpu stress`, `ram test`, `ram stress`, `disk test`, `network server`, `network test`, `full test`, `system info`. Advanced presets are `quick|standard|precision`; `max` belongs to the automatic interface.
 
@@ -194,10 +221,10 @@ Advanced flags include `--preset`, `--config`, `--workers`/`--threads`, `--durat
 | Missing fio/iperf3 | Rerun initialization or supply compatible engines beside the CLI; `doctor` checks identity/options |
 | Missing loader/shared library | Use an engine built for the actual architecture/libc; inspect `ldd`/`readelf` and the named path |
 | Permission denied | Check execute bits, mount `noexec`, target ownership and container restrictions |
-| io_uring denied | Automatic modes require available libaio instead; advanced users explicitly select `--ioengine libaio`; no synchronous fallback |
+| io_uring denied | Automatic Disk validates libaio next; advanced users can request `--ioengine auto` or `--ioengine libaio`. Initialization defers Disk validation; no synchronous fallback |
 | Directory missing/space insufficient | Create/select an existing disposable directory with reserve space and quota headroom |
 | Peer unreachable | Start the trusted peer's iperf3 server, check literal IP, port/firewall and supported features |
-| Old binary after git pull | Use `bash start.sh quick`; direct binaries do not rebuild themselves |
+| Old binary after git pull | Use `bash start.sh`; direct binaries do not rebuild themselves |
 
 See [diagnostics](docs/TROUBLESHOOTING.md) for details.
 

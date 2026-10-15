@@ -50,7 +50,8 @@ while (($#)); do if [[ $1 == -o ]]; then cp "$FIXTURE_TEMPLATES/compute-bench" "
             content=f'''# bootstrap-test-executable
 case "${{1:-}}" in
 --version|-v) echo '{version}';;
---enghelp) echo ' io_uring libaio';;
+--enghelp) [[ ${{FIXTURE_ENGHELP_FAIL:-0}} != 1 ]] || {{ echo 'engine query failed' >&2; exit 1; }}; echo "${{FIXTURE_FIO_ENGINES:-io_uring libaio}}";;
+doctor) [[ ${{FIXTURE_DOCTOR_FAIL:-0}} != 1 ]] || {{ echo 'injected runtime failure' >&2; exit 1; }}; echo 'CPU engine: READY'; echo 'Memory engine: READY'; echo 'io_uring: UNAVAILABLE'; echo 'libaio: AVAILABLE_NOT_VALIDATED'; echo 'Disk validation deferred';;
 --help|version) echo '{version}';;
 *) printf '%s\\0' "$@" > "$FIXTURE_ARGS"; exit "${{FIXTURE_CLI_EXIT:-0}}";;
 esac
@@ -91,10 +92,41 @@ if [[ ${{FIXTURE_GO_TEST_FAIL:-0}} == 1 ]]; then echo 'FAIL: injected Go unit te
         script='set -euo pipefail; ROOT=$1; source "$ROOT/scripts/bootstrap-common.sh"; fingerprint cli > "$ROOT/.vmbench/cli-source.sha256"; fingerprint native > "$ROOT/.vmbench/native-source.sha256"'
         r=subprocess.run([BASH,'--noprofile','--norc','-c',script,'known-build-fixture',shellpath(self.root)],env=self.env,text=True,capture_output=True,timeout=30)
         self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+    def test_rhel_recovery_deferred_disk_reuses_dependencies(self):
+        (self.base/'os-release').write_text('ID=rhel\nVERSION_ID="9.6"\n')
+        self.prebuilts();self.env['FIXTURE_DOCTOR_FAIL']='1'
+        self.run_script('init.sh',['--offline'],ok=False)
+        self.assertFalse((self.root/'.vmbench/install-state.json').exists())
+        before=self.calls();self.env.pop('FIXTURE_DOCTOR_FAIL')
+        result=self.run_script('init.sh',['--offline'])
+        self.assertIn('libaio: AVAILABLE_NOT_VALIDATED',result.stdout)
+        self.assertIn('Disk validation deferred',result.stdout)
+        self.assertEqual(self.calls(),before)
+        self.assertNotIn('network-or-install',self.calls())
+    def test_no_compiled_async_does_not_block_other_components(self):
+        self.env['FIXTURE_FIO_ENGINES']='sync psync'
+        self.first();before=self.calls()
+        self.run_script(args=['cpu','quick','--non-interactive'])
+        self.assertEqual(self.calls(),before)
+    def test_fio_engine_query_failure_remains_fatal(self):
+        self.env['FIXTURE_ENGHELP_FAIL']='1'
+        self.run_script('init.sh',['--offline'],ok=False)
+        self.assertFalse((self.root/'.vmbench/install-state.json').exists())
     def test_first_initialization(self):
         self.first();state=json.loads((self.root/'.vmbench/install-state.json').read_text());self.assertEqual(state['status'],'validated');self.assertIn('cli-build',self.calls());self.assertIn('native-build',self.calls());self.assertIn('go-test go1.23.12 off',self.calls());self.assertNotIn('network-or-install',self.calls())
     def test_second_launch_and_argument_forwarding(self):
         self.first();before=self.calls();self.run_script(args=['cpu','test','--path','a path with spaces','$(touch unsafe)']);self.assertEqual(self.calls(),before);self.assertEqual((self.base/'args').read_bytes().split(b'\0')[:-1],[b'cpu',b'test',b'--path',b'a path with spaces',b'$(touch unsafe)'])
+    def test_component_modes_are_forwarded_without_rebuilding(self):
+        self.first();before=self.calls()
+        for component in ['cpu','ram','disk','network']:
+            for mode in ['quick','standard','max']:
+                args=[component,mode,'--non-interactive']
+                if component=='disk':args+=['--path','/data path']
+                if component=='network':args+=['--target','10.0.0.20']
+                if mode=='max':args+=['--ack-max']
+                self.run_script(args=args)
+                self.assertEqual((self.base/'args').read_bytes().split(b'\0')[:-1],[a.encode() for a in args])
+                self.assertEqual(self.calls(),before)
     def test_version_flags_work_through_startup_and_init_reuses(self):
         self.run_script(args=['--offline','--version']);before=self.calls()
         for argument in ['--version','-v','version']:

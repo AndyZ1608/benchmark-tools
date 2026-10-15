@@ -124,6 +124,9 @@ func diskModule(r report.Report, m Module, threshold float64) Module {
 			cleanup = "COMPLETED"
 		}
 		m.Context = []Metric{{"Target", life.Target}, {"Jobs", strconv.Itoa(life.Jobs)}, {"File size per job", unit(float64(life.FileBytes)/(1<<30), "GiB", 3)}, {"Total test data", unit(float64(life.TotalBytes)/(1<<30), "GiB", 3)}, {"Preparation (not measured by fio)", unit(life.PreparationSeconds, "s", 2)}, {"Temporary file cleanup", cleanup}}
+		if life.Engine != "" {
+			m.Context = append(m.Context, Metric{"Selected I/O engine", life.Engine})
+		}
 		if !life.CleanupCompleted {
 			m.Status = "failed"
 			m.Warnings = append(m.Warnings, "Temporary file cleanup incomplete; inspect the retained workspace: "+life.Workspace)

@@ -59,3 +59,18 @@ Real testing found two correctness defects and drove repairs:
 The final script verified workspace removal and sentinel hashes after every mode/cancellation, and explicitly checked for leftover fio processes. Engine work and storage were confined to the disposable guest. See [mode methodology and limits](AUTOMATIC.md) and [disk ownership guarantees](DISK.md).
 
 These tests do not establish storage backend allocation, immunity to caching/compression, cross-NUMA placement quality, target Ubuntu compatibility, a network maximum without a peer, or independent native-kernel timing calibration. No host kernel change, system upgrade or host reboot was performed. Only the disposable VM was used for real load.
+
+
+## Component-first CLI validation - 2026-10-15
+
+This source update changes navigation and component dispatch; the benchmark engines and measurement policies are unchanged. The main menu offers CPU/RAM/DISK/NETWORK, followed by QUICK/STANDARD/MAX. Legacy combined commands and advanced commands remain available.
+
+- The full Go suite and `go vet ./...` passed on the Windows development host; the CLI built and passed controlled-input menu smoke checks. The Linux ARM64 CLI cross-build passed; native ARM64 execution remains unverified.
+- In the disposable Alpine 3.22.6 amd64 VM, the safety suite and complete Go suite passed as UID 1000. The read-only mount safety test skips without mount capability; permission, ownership, symlink and cleanup tests passed.
+- Fixture tests cover every component/mode combination, exclude unrelated workloads, retain numerical/result assertions, and cover invalid choices, target retries, Back/Exit/EOF and cancellation at each interactive stage. No heavy MAX workload is used.
+- An actual SIGINT test keeps stdin open until process exit, proving that cancellation releases an idle menu independently of EOF. The freshly built Linux executable also passed this check as UID 1000.
+- Real `start.sh --offline` detected changed CLI sources, rebuilt, ran the complete Go suite before publication, and opened the new component menu. Repeated launch preserved CLI/native/state checksums. Safe version checks ran; no benchmark workloads ran during this validation.
+- All 52 bootstrap fixture tests passed on Linux, including all 12 component/mode forwarding combinations, rebuild/reuse, failed-validation publication guards, and installation adapters. The duplicate Windows bootstrap run was stopped after the Linux suite completed; it is not counted as a completed suite.
+- Both shell entry points passed `bash -n`. The built CLI rejected missing Disk/Network targets and missing MAX acknowledgment when stdin was `/dev/null`; a character device alone no longer grants interactive consent.
+
+These checks validate source behavior in the named test environments. They do not requalify the previously packaged offline archive, Ubuntu/other distributions, native ARM64, or real network performance. Existing installation, release and filesystem qualification limits still apply.

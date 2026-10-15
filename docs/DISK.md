@@ -59,3 +59,12 @@ Private permissions isolate other users. A process running as the same UID or a 
 SIGKILL, VM shutdown or host/storage failure cannot guarantee immediate cleanup. `.vmbench-owner` records run identity, UID/PID/time, workspace and job device/inode identities, sizes, seed and verified checksums. It is safety metadata inside the temporary workspace, not a benchmark-results export. It is removed on ordinary successful cleanup and retained when cleanup is incomplete. No orphan-cleanup command or automatic deletion of older directories is provided. Before any manual removal, verify identities/ownership against current filesystem state and ensure no live VMBench/fio process holds those files. A prefix or metadata file alone is not sufficient authority to remove arbitrary data.
 
 See [executed validation](DISK_VALIDATION.md).
+
+
+## Asynchronous engine validation
+
+Installation checks engine identity and runtime dependencies, while `doctor` reports compiled/setup candidates without writing data. Disk setup requires a selected writable filesystem. Automatic component modes functionally probe io_uring first and then libaio; advanced `--ioengine auto` opts into the same order. An explicit io_uring/libaio request uses only that engine and reports alternatives without substituting them.
+
+The separate capability probe prepares and synchronizes one private 1MiB regular file using the existing protected lifecycle, then submits at most 64 direct 4K reads at QD4 per candidate, under a five-second deadline. fio must return success, the selected engine, nonzero valid completion metrics, exactly 64 completed reads/256KiB and a meaningful achieved-depth distribution. Probe results are discarded; only owned probe files are removed after the child exits. No target means validation is deferred; no engine means Disk is unsupported, while other components remain available. No security policy is modified.
+
+Measured samples also require completed-I/O counters, no short/dropped I/O and valid engine/depth evidence. At requested QD >1, at least 50% of observations must be in depth buckets reaching the power-of-two range at half the requested depth, with a minimum lower bound of two. A QD1-dominated QD64 candidate is rejected, not published as a maximum. Displayed QD remains a requested setting and the observed distribution is reported separately. Results from different engines are not silently combined.

@@ -13,6 +13,6 @@ Run `bash init.sh --check` for read-only source-install diagnostics, or `./vmben
 - Disk missing/quota/space: select an existing writable directory with reserve headroom. Preparation writes real data even for read tests. Quota or allocation failures stop and clean verified owned files. Do not use production-critical storage during busy periods.
 - XFS/Btrfs/direct-I/O errors: these filesystems have not been qualified here. Preserve the exact fio error; do not disable direct I/O to manufacture a comparable result.
 - Peer unreachable/option missing: check literal trusted IP, port, firewall and peer iperf3 features. No peer means Network is skipped; help/version checks do not test connectivity.
-- Stale source binary: use `bash start.sh quick` after git pull. The executable itself has no self-rebuild mechanism.
+- Stale source binary: use `bash start.sh cpu quick` after git pull. The executable itself has no self-rebuild mechanism.
 - Stale initialization lock: confirm no initializer is running, then remove only `.vmbench/init.lock`. Never remove benchmark data by wildcard/prefix.
 - Abrupt termination: preserve leftover ownership/recovery metadata for manual inspection. Cleanup never recursively removes arbitrary historical workspaces or unrelated files.

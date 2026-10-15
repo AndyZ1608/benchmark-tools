@@ -42,7 +42,15 @@ func fakeFio() {
 		}
 		return ""
 	}
-	if get("thread") != "1" || get("allow_file_create") != "0" || get("unlink") != "0" || get("fallocate") != "none" || get("time_based") != "1" {
+	probe := get("number_ios") == "64"
+	if probe && (get("direct") != "1" || get("iodepth") != "4" || get("bs") != "4k" || get("io_size") != "256k") {
+		os.Exit(99)
+	}
+	expectedTime := "1"
+	if probe {
+		expectedTime = "0"
+	}
+	if get("thread") != "1" || get("allow_file_create") != "0" || get("unlink") != "0" || get("fallocate") != "none" || get("time_based") != expectedTime {
 		fmt.Fprintln(os.Stderr, "unsafe or untimed fio fixture invocation")
 		os.Exit(91)
 	}
@@ -87,10 +95,21 @@ func fakeFio() {
 		}
 	}
 	marker := os.Getenv("VMBENCH_FIO_MARKER")
-	if marker != "" {
+	if marker != "" && !probe {
 		os.WriteFile(marker, []byte("started"), 0600)
 	}
 	mode := os.Getenv("VMBENCH_FIO_MODE")
+	if probe {
+		mode = os.Getenv("VMBENCH_FIO_PROBE_MODE")
+	}
+	if probe && mode == "uring-denied" && get("ioengine") == "io_uring" {
+		fmt.Fprintln(os.Stderr, "Operation not permitted")
+		os.Exit(1)
+	}
+	if probe && mode == "aio-fails" {
+		fmt.Fprintln(os.Stderr, "io_submit: Input/output error")
+		os.Exit(1)
+	}
 	if mode == "hang" {
 		time.Sleep(60 * time.Second)
 		return
@@ -111,10 +130,25 @@ func fakeFio() {
 		return
 	}
 	runTime, _ := strconv.ParseFloat(get("runtime"), 64)
-	value := Direction{IOPS: 100, BWBytes: 409600, Runtime: runTime * 1000, Completion: Latency{Mean: 10000, Percentile: map[string]float64{"99.000000": 20000}}}
+	ios := uint64(100)
+	if probe {
+		ios = 64
+	}
+	block := uint64(4096)
+	if get("bs") == "1m" {
+		block = 1 << 20
+	}
+	value := Direction{TotalIOs: ios, IOBytes: ios * block, IOPS: 100, BWBytes: 409600, Runtime: runTime * 1000, Completion: Latency{Mean: 10000, Percentile: map[string]float64{"99.000000": 20000}}}
 	result := Result{Options: map[string]string{"ioengine": get("ioengine")}}
 	for range names {
-		job := Job{Depth: map[string]float64{get("iodepth"): 100}}
+		bucket := get("iodepth")
+		if bucket == "64" {
+			bucket = ">=64"
+		}
+		job := Job{Depth: map[string]float64{bucket: 100}}
+		if mode == "depth-one" {
+			job.Depth = map[string]float64{"1": 100}
+		}
 		switch get("rw") {
 		case "randrw":
 			job.Read, job.Write = value, value

@@ -1,6 +1,6 @@
 # Source installation
 
-Use Bash on a recognized Linux distribution with standard coreutils/findutils, tar, timeout and the libc inspection utility ldd. Alpine minimal images may need Bash/coreutils/findutils before running scripts; the precompiled CLI has no such build prerequisites. Run `bash start.sh` to initialize and open the menu; subsequent calls can use `bash start.sh quick`.
+Use Bash on a recognized Linux distribution with standard coreutils/findutils, tar, timeout and the libc inspection utility ldd. Alpine minimal images may need Bash/coreutils/findutils before running scripts; the precompiled CLI has no such build prerequisites. Run `bash start.sh` to initialize and open the menu; subsequent calls can use `bash start.sh cpu quick`.
 
 ## Detection and dependency selection
 
@@ -34,4 +34,4 @@ Files are staged and checked before replacement. The final state/hash marker is 
 
 ## Engine/runtime diagnostics
 
-Every selected binary must have executable permissions, the matching ELF machine, working loader/libraries and recognized version output. fio needs compiled io_uring or libaio. Safe iperf3 help queries check required options. Initialization records versions, origin and linkage; this is host-specific evidence, not portable release qualification. Run `./vmbench doctor` for diagnostics without ldd/binutils/Go. Actual runtime invocation catches failures that dependency lists alone cannot establish.
+Every selected binary must have executable permissions, the matching ELF machine, working loader/libraries and recognized version output. fio engine queries must succeed; compiled async candidates and setup permissions are reported independently. A missing/unpermitted async candidate blocks only Disk, whose real direct-I/O and depth checks wait for an explicit target. Safe iperf3 help queries check required options. Initialization records versions, origin and linkage; this is host-specific evidence, not portable release qualification. Run `./vmbench doctor` for diagnostics without ldd/binutils/Go. Actual runtime invocation catches failures that dependency lists alone cannot establish.

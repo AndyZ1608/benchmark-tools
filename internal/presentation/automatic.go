@@ -9,13 +9,27 @@ import (
 
 func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "================================================\nVMBENCH - %s PERFORMANCE\n================================================\n", strings.ToUpper(SafeText(r.Mode)))
+	title := strings.ToUpper(SafeText(r.Mode))
+	if r.Limits.Component != "" {
+		title = strings.ToUpper(SafeText(r.Limits.Component)) + " - " + title
+	}
+	fmt.Fprintf(&b, "================================================\nVMBENCH - %s PERFORMANCE\n================================================\n", title)
 	fmt.Fprintf(&b, "Status: %s\nDuration: %.1f seconds\n", SafeText(r.Status), r.Duration.Seconds())
 	for _, m := range []struct {
 		name  string
 		peaks []automatic.Peak
 	}{{"CPU", r.CPU}, {"MEMORY", r.Memory}, {"DISK", r.Disk}, {"NETWORK", r.Network}} {
-		fmt.Fprintf(&b, "\n%s - %s\n------------------------------------------------\n", m.name, SafeText(r.States[m.name]))
+		if !r.Limits.Selects(m.name) {
+			continue
+		}
+		label := m.name
+		if r.Limits.Component == "ram" && label == "MEMORY" {
+			label = "RAM"
+		}
+		fmt.Fprintf(&b, "\n%s - %s\n------------------------------------------------\n", label, SafeText(r.States[m.name]))
+		if m.name == "DISK" && r.DiskInfo.Engine != "" {
+			fmt.Fprintln(&b, "Selected I/O engine: "+SafeText(r.DiskInfo.Engine))
+		}
 		if m.name == "DISK" && r.DiskInfo.Path != "" {
 			fmt.Fprintf(&b, "Target: %s (%s, mount %s)\n", SafeText(r.DiskInfo.Path), SafeText(r.DiskInfo.Filesystem), SafeText(r.DiskInfo.Mount))
 			if r.DiskInfo.PreparedJobs > 0 {
@@ -165,10 +179,26 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 			}
 		}
 	}
-	fmt.Fprintf(&b, "\nSearch limits: %d effective workers; RAM dataset %s. MAX means observed performance within configured limits.\n", r.Plan.Workers, unit(float64(r.Plan.MemoryBytes)/(1<<20), "MiB", 0))
+	if r.Limits.Component == "" {
+		fmt.Fprintf(&b, "\nSearch limits: %d effective workers; RAM dataset %s. MAX means observed performance within configured limits.\n", r.Plan.Workers, unit(float64(r.Plan.MemoryBytes)/(1<<20), "MiB", 0))
+	} else {
+		fmt.Fprintln(&b, "\nMAX means observed performance within configured limits.")
+	}
 	if r.Limits.MaxDepth > 0 {
 		o := r.Limits
-		fmt.Fprintf(&b, "Ceilings: RAM allocation %s; disk data %s; free reserve %s; QD%d / %d jobs / %d outstanding I/Os\nNetwork: %d streams, %s aggregate offered bits/s; total time ceiling %s\n", o.MaxRAM, o.MaxDisk, o.MinFree, o.MaxDepth, o.MaxJobs, o.MaxOutstanding, o.MaxStreams, o.NetworkBitrate, o.MaxDuration)
+		if o.Selects("CPU") || o.Selects("MEMORY") {
+			fmt.Fprintf(&b, "Effective worker ceiling: %d\n", r.Plan.Workers)
+		}
+		if o.Selects("MEMORY") {
+			fmt.Fprintf(&b, "RAM allocation ceiling: %s\n", o.MaxRAM)
+		}
+		if o.Selects("DISK") {
+			fmt.Fprintf(&b, "Disk ceilings: data %s; free reserve %s; QD%d / %d jobs / %d outstanding I/Os\n", o.MaxDisk, o.MinFree, o.MaxDepth, o.MaxJobs, o.MaxOutstanding)
+		}
+		if o.Selects("NETWORK") {
+			fmt.Fprintf(&b, "Network ceilings: %d streams, %s aggregate offered bits/s\n", o.MaxStreams, o.NetworkBitrate)
+		}
+		fmt.Fprintf(&b, "Total time ceiling: %s\n", o.MaxDuration)
 	}
 	warnings := append([]string{}, r.Warnings...)
 	if r.DiskInfo.System {

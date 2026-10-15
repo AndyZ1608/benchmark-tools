@@ -11,6 +11,7 @@ import (
 	"vmbench/internal/benchmark/cpu"
 	"vmbench/internal/benchmark/disk"
 	"vmbench/internal/config"
+	"vmbench/internal/runner"
 	"vmbench/internal/system"
 )
 
@@ -29,10 +30,19 @@ type Result struct {
 }
 
 func Run(ctx context.Context, o Options, b Backend, progress func(string)) (out Result, err error) {
-	out = Result{Mode: o.Mode, Limits: o, Status: "COMPLETED", States: map[string]string{"CPU": "NOT RUN", "MEMORY": "NOT RUN", "DISK": "NOT RUN", "NETWORK": "NOT RUN"}}
+	out = Result{Mode: o.Mode, Limits: o, Status: "COMPLETED", States: map[string]string{}}
+	for _, module := range []string{"CPU", "MEMORY", "DISK", "NETWORK"} {
+		if o.Selects(module) {
+			out.States[module] = "NOT RUN"
+		}
+	}
 	if err = o.Validate(); err != nil {
 		out.Status = "FAILED"
 		return out, err
+	}
+	if o.Component == "disk" && o.DiskPath == "" || o.Component == "network" && o.NetworkPeer == "" {
+		out.Status = "FAILED"
+		return out, fmt.Errorf("%s requires an explicit target (--path or --target)", o.Component)
 	}
 	if o.Mode == "max" && !o.AckMax {
 		out.Status = "FAILED"
@@ -49,12 +59,19 @@ func Run(ctx context.Context, o Options, b Backend, progress func(string)) (out 
 	}()
 	out.Resources = b.Detect()
 	out.Plan = MakePlan(o, out.Resources)
-	out.Warnings = append(out.Warnings, out.Plan.Warnings...)
+	if o.Selects("MEMORY") {
+		out.Warnings = append(out.Warnings, out.Plan.Warnings...)
+	} else {
+		out.Warnings = append(out.Warnings, out.Resources.DetectionWarnings...)
+	}
 	if progress != nil {
 		progress("[OK] System detected")
 	}
 	// A single synchronous loop prevents cross-module benchmark interference.
 	for _, module := range []string{"CPU", "MEMORY", "DISK", "NETWORK"} {
+		if !o.Selects(module) {
+			continue
+		}
 		if e := ctx.Err(); e != nil {
 			out.Errors = append(out.Errors, e.Error())
 			err = errors.Join(err, e)
@@ -260,6 +277,21 @@ func diskSize(o Options, p Plan, s system.Info, info DiskInfo, jobs int) (int64,
 	}
 	return perJob, nil
 }
+
+// CheckDiskTarget only inspects metadata and capacity. Execution revalidates
+// the target and reserves space through the existing secure disk session.
+func CheckDiskTarget(o Options, b Backend) (DiskInfo, error) {
+	if err := o.Validate(); err != nil {
+		return DiskInfo{}, err
+	}
+	info, err := b.Filesystem(o.DiskPath)
+	if err != nil {
+		return info, err
+	}
+	s := b.Detect()
+	_, err = diskSize(o, MakePlan(o, s), s, info, 1)
+	return info, err
+}
 func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Backend, progress func(string)) (peaks []Peak, info DiskInfo, total uint64, cleaned bool, err error) {
 	info, err = b.Filesystem(o.DiskPath)
 	if err != nil {
@@ -281,35 +313,28 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 	total = uint64(size) * uint64(jobs)
 	info.PreparedJobs = jobs
 	info.FileBytes = uint64(size)
-	engines, e := b.Engines(ctx)
-	if e != nil {
-		err = e
-		return
-	}
-	engine := ""
-	for _, preferred := range []string{"libaio", "io_uring"} {
-		for _, available := range engines {
-			if available == preferred {
-				engine = preferred
-				break
-			}
-		}
-		if engine != "" {
-			break
-		}
-	}
-	if engine == "" {
-		err = fmt.Errorf("no verified asynchronous fio engine available")
-		return
-	}
 	c := baseConfig(1, 0)
 	c.Path = o.DiskPath
 	c.Jobs = jobs
 	c.FileSize = strconv.FormatInt(size, 10)
 	c.DiskSizeExplicit = true
-	c.Engine = engine
+	c.Engine = o.DiskEngine
 	c.ConfirmWrites = o.ConfirmWrites
 	reserve, _ := config.Bytes(o.MinFree)
+	if progress != nil {
+		ctx = runner.WithObserver(ctx, func(event runner.Event) {
+			if event.Phase == "capability" {
+				progress(event.Message)
+			}
+		})
+	}
+	engine, e := b.SelectDiskEngine(ctx, c, uint64(reserve))
+	if e != nil {
+		err = e
+		return
+	}
+	c.Engine = engine
+	info.Engine = engine
 	if progress != nil {
 		progress(fmt.Sprintf("[DISK] Preparing %d bytes across %d private job files (read preparation writes data)", total, jobs))
 	}

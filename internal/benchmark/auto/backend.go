@@ -13,19 +13,18 @@ import (
 	"vmbench/internal/benchmark/disk"
 	"vmbench/internal/benchmark/network"
 	"vmbench/internal/config"
-	"vmbench/internal/platform"
 	"vmbench/internal/runner"
 	"vmbench/internal/safety"
 	"vmbench/internal/system"
 )
 
 type DiskInfo struct {
-	Path, Filesystem, Mount string
-	Free                    uint64
-	System                  bool
-	PreparedJobs            int
-	FileBytes               uint64
-	Prepared                bool
+	Path, Filesystem, Mount, Engine string
+	Free                            uint64
+	System                          bool
+	PreparedJobs                    int
+	FileBytes                       uint64
+	Prepared                        bool
 }
 type DiskSession interface {
 	Measure(context.Context, config.Config) (disk.Outcome, error)
@@ -35,7 +34,7 @@ type Backend interface {
 	Detect() system.Info
 	Native(context.Context, string, config.Config) (cpu.NativeResult, map[string]float64, error)
 	Filesystem(string) (DiskInfo, error)
-	Engines(context.Context) ([]string, error)
+	SelectDiskEngine(context.Context, config.Config, uint64) (string, error)
 	OpenDisk(context.Context, config.Config, uint64) (DiskSession, error)
 	Network(context.Context, config.Config) (network.Result, error)
 }
@@ -122,44 +121,42 @@ func (RealBackend) Filesystem(path string) (DiskInfo, error) {
 	}
 	return r, nil
 }
-func (RealBackend) Engines(ctx context.Context) ([]string, error) {
-	names, err := disk.Engines(ctx)
-	if err != nil {
-		return nil, err
-	}
-	uringOK, uringReason := platform.IOUring()
-	aioOK, aioReason := platform.LinuxAIO()
-	if !uringOK {
-		runner.Notice(ctx, "compatibility", "io_uring unavailable: "+uringReason)
-	}
-	if !aioOK {
-		runner.Notice(ctx, "compatibility", "Linux asynchronous AIO unavailable: "+aioReason)
-	}
-	var available []string
-	for _, name := range names {
-		if (name == "io_uring" && uringOK) || (name == "libaio" && aioOK) {
-			available = append(available, name)
-		}
-	}
-	if len(available) == 0 {
-		return nil, fmt.Errorf("no compiled/permitted asynchronous fio engine: io_uring=%s, libaio=%s; no synchronous fallback", uringReason, aioReason)
-	}
-	return available, nil
+func (RealBackend) SelectDiskEngine(ctx context.Context, c config.Config, reserve uint64) (string, error) {
+	return disk.SelectEngine(ctx, c, reserve)
 }
 
 func (RealBackend) OpenDisk(ctx context.Context, c config.Config, reserve uint64) (DiskSession, error) {
 	return disk.OpenSession(ctx, c, reserve)
 }
 func (RealBackend) Network(ctx context.Context, c config.Config) (network.Result, error) {
-	// An explicit remote address is the trust boundary; reject this guest's own addresses.
-	addresses, _ := net.InterfaceAddrs()
-	for _, a := range addresses {
-		ip, _, _ := net.ParseCIDR(a.String())
-		if ip != nil && ip.Equal(net.ParseIP(c.Target)) {
-			return network.Result{}, fmt.Errorf("configured peer resolves to a local interface; remote peer required")
-		}
+	if err := ValidatePeer(c.Target); err != nil {
+		return network.Result{}, err
 	}
 	return network.Run(ctx, c)
+}
+
+// ValidatePeer performs no traffic and is shared by input validation and execution.
+func ValidatePeer(target string) error {
+	o := Defaults("quick")
+	o.NetworkPeer = target
+	if target == "" {
+		return fmt.Errorf("remote server IP is required")
+	}
+	if err := o.Validate(); err != nil {
+		return err
+	}
+	// An explicit remote address is the trust boundary; reject this guest's own addresses.
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return fmt.Errorf("cannot verify remote peer against local interfaces: %w", err)
+	}
+	for _, a := range addresses {
+		ip, _, _ := net.ParseCIDR(a.String())
+		if ip != nil && ip.Equal(net.ParseIP(target)) {
+			return fmt.Errorf("configured peer resolves to a local interface; remote peer required")
+		}
+	}
+	return nil
 }
 func networkSample(result network.Result) (Sample, error) {
 	if result.Error != "" {

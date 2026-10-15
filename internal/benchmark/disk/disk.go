@@ -13,6 +13,10 @@ type Latency struct {
 	Bins       map[string]uint64  `json:"bins"`
 }
 type Direction struct {
+	TotalIOs   uint64  `json:"total_ios"`
+	IOBytes    uint64  `json:"io_bytes"`
+	ShortIOs   uint64  `json:"short_ios"`
+	DropIOs    uint64  `json:"drop_ios"`
 	IOPS       float64 `json:"iops"`
 	BWBytes    float64 `json:"bw_bytes"`
 	Runtime    float64 `json:"runtime"`

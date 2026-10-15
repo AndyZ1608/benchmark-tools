@@ -3,10 +3,14 @@ package disk
 import "testing"
 
 func TestFioEngineAndAchievedDepthEvidence(t *testing.T) {
-	r := Result{Options: map[string]string{"ioengine": "libaio"}, Jobs: []Job{{Depth: map[string]float64{"1": 90, "32": 10}}}}
+	r := Result{Options: map[string]string{"ioengine": "libaio"}, Jobs: []Job{{Read: Direction{IOPS: 1, TotalIOs: 1, IOBytes: 4096}, Depth: map[string]float64{"1": 90, "32": 10}}}}
 	evidence, e := ExecutionEvidence(r, "libaio", 32)
-	if e != nil || evidence == "" {
+	if e == nil || evidence != "" {
 		t.Fatal(evidence, e)
+	}
+	r.Jobs[0].Depth = map[string]float64{"32": 100}
+	if _, e = ExecutionEvidence(r, "libaio", 32); e != nil {
+		t.Fatal(e)
 	}
 	r.Options["ioengine"] = "sync"
 	if _, e = ExecutionEvidence(r, "libaio", 32); e == nil {

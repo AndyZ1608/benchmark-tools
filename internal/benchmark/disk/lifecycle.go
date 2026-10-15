@@ -17,7 +17,7 @@ import (
 )
 
 type Lifecycle struct {
-	Target, Workspace          string
+	Target, Workspace, Engine  string
 	FileBytes, TotalBytes      uint64
 	Jobs                       int
 	Seed                       uint64
@@ -79,27 +79,6 @@ func RunManaged(ctx context.Context, c config.Config, _ string) (out Outcome, er
 	out.Lifecycle.Target = metadata["path"].(string)
 	out.Lifecycle.Jobs = c.Jobs
 	runner.Notice(ctx, "validated", fmt.Sprintf("[OK] Target directory validated: %s", out.Lifecycle.Target))
-	// Probe execution/dependencies before creating a workspace or writing data.
-	version, err := runner.Run(ctx, "fio", []string{"--version"}, 5*time.Second)
-	if err != nil {
-		return out, fmt.Errorf("fio preflight: %w", err)
-	}
-	if !strings.HasPrefix(strings.TrimSpace(string(version)), "fio-") {
-		return out, fmt.Errorf("fio preflight: executable does not identify as fio: %q", strings.TrimSpace(string(version)))
-	}
-	engines, err := runner.Run(ctx, "fio", []string{"--enghelp"}, 5*time.Second)
-	if err != nil {
-		return out, fmt.Errorf("fio engine capability check: %w", err)
-	}
-	found := false
-	for _, name := range strings.Fields(string(engines)) {
-		if name == c.Engine {
-			found = true
-		}
-	}
-	if !found {
-		return out, fmt.Errorf("fio does not provide requested I/O engine %q; no fallback was used", c.Engine)
-	}
 	size, err := config.Bytes(c.FileSize)
 	if err != nil {
 		return out, err
@@ -117,6 +96,12 @@ func RunManaged(ctx context.Context, c config.Config, _ string) (out Outcome, er
 		return out, err
 	}
 	out.Lifecycle.Seed = seed
+	c.Engine, err = SelectEngine(ctx, c, safety.ReserveBytes)
+	if err != nil {
+		return out, err
+	}
+	out.Lifecycle.Engine = c.Engine
+
 	target, err := safety.PrepareSized(c.Path, "", size, c.Jobs, !c.DiskSizeExplicit)
 	if err != nil {
 		return out, err
@@ -152,7 +137,10 @@ func RunManaged(ctx context.Context, c config.Config, _ string) (out Outcome, er
 	return out, e
 }
 
-func measurePrepared(ctx context.Context, c config.Config, target *safety.Target) (out Outcome, err error) {
+func measurePrepared(ctx context.Context, c config.Config, target *safety.Target) (Outcome, error) {
+	return measurePreparedLimited(ctx, c, target, false)
+}
+func measurePreparedLimited(ctx context.Context, c config.Config, target *safety.Target, probe bool) (out Outcome, err error) {
 	if c.Jobs < 1 || c.Jobs > target.Plan.Jobs {
 		return out, fmt.Errorf("requested jobs exceed prepared files")
 	}
@@ -175,17 +163,29 @@ func measurePrepared(ctx context.Context, c config.Config, target *safety.Target
 			if err = target.Validate(); err != nil {
 				return out, err
 			}
-			args := append(append([]string{}, base...), "--rw="+rw, "--bs="+bs, "--rwmixread=70", "--iodepth="+strconv.Itoa(depth), "--time_based=1", "--runtime="+strconv.Itoa(c.Duration), "--ramp_time="+strconv.Itoa(c.Warmup))
+			timeBased := "1"
+			if probe {
+				timeBased = "0"
+			}
+			args := append(append([]string{}, base...), "--rw="+rw, "--bs="+bs, "--rwmixread=70", "--iodepth="+strconv.Itoa(depth), "--time_based="+timeBased, "--runtime="+strconv.Itoa(c.Duration), "--ramp_time="+strconv.Itoa(c.Warmup))
+			timeout := time.Duration(c.Duration+c.Warmup+30) * time.Second
+			if probe {
+				args = append(args, "--number_ios=64", "--io_size=256k")
+				timeout = 5 * time.Second
+			}
 			for i := 0; i < c.Jobs; i++ {
 				args = append(args, fmt.Sprintf("--name=job-%03d", i+1), fmt.Sprintf("--filename=/proc/self/fd/%d", 3+i))
 			}
-			b, e := runner.RunFiles(ctx, "fio", args, time.Duration(c.Duration+c.Warmup+30)*time.Second, target.EngineFiles()[:c.Jobs])
+			b, e := runner.RunFiles(ctx, "fio", args, timeout, target.EngineFiles()[:c.Jobs])
 			if e != nil {
 				return out, fmt.Errorf("fio %s at QD%d repetition %d in workspace %q: %w", c.Profile, depth, repeat+1, target.Dir, e)
 			}
 			result, e := Parse(b)
 			if e == nil {
 				e = validateMeasurement(result, c, rw)
+				if e == nil {
+					_, e = ExecutionEvidence(result, c.Engine, depth)
+				}
 			}
 			if e != nil {
 				return out, fmt.Errorf("invalid fio result for %s QD%d repetition %d: %w", c.Profile, depth, repeat+1, e)
@@ -194,7 +194,9 @@ func measurePrepared(ctx context.Context, c config.Config, target *safety.Target
 			out.Raw = append(out.Raw, json.RawMessage(b))
 		}
 	}
-	runner.Notice(ctx, "measured", "[OK] fio benchmark completed")
+	if !probe {
+		runner.Notice(ctx, "measured", "[OK] fio benchmark completed")
+	}
 	return out, nil
 }
 func boolInt(value bool) int {
@@ -226,6 +228,17 @@ func validateMeasurement(result Result, c config.Config, rw string) error {
 		}
 		for _, direction := range directions {
 			v := direction.value
+			if v.TotalIOs == 0 || v.IOBytes == 0 || v.ShortIOs != 0 || v.DropIOs != 0 {
+				return fmt.Errorf("job-%03d %s completed I/O counters missing, zero, short or dropped", i+1, direction.name)
+			}
+			_, bs, _ := profile(c)
+			block := uint64(4096)
+			if bs == "1m" {
+				block = 1 << 20
+			}
+			if v.IOBytes%v.TotalIOs != 0 || v.IOBytes/v.TotalIOs != block {
+				return fmt.Errorf("job-%03d %s completed byte/count evidence is inconsistent with block size", i+1, direction.name)
+			}
 			for _, metric := range []struct {
 				name  string
 				value float64

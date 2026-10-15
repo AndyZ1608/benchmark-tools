@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,10 +15,32 @@ import (
 	"vmbench/internal/presentation"
 )
 
-const menu = `============================================
-                  VMBENCH
-          VM PERFORMANCE BENCHMARK
-============================================
+const menu = `================================================
+                    VMBENCH
+           VM PERFORMANCE BENCHMARK
+================================================
+
+Select Benchmark Component:
+
+  [1] CPU
+      CPU performance and stress testing
+
+  [2] RAM
+      Memory bandwidth and latency
+
+  [3] DISK
+      IOPS, throughput and latency
+
+  [4] NETWORK
+      Network throughput and performance
+
+  [0] Exit
+
+Select: `
+
+const modeMenu = `================================================
+             VMBENCH - %s
+================================================
 
 Select Benchmark Mode:
 
@@ -30,39 +53,313 @@ Select Benchmark Mode:
   [3] MAX
       Discover maximum observed performance
 
-  [0] Exit
+  [0] Back
 
 Select: `
 
-func selectMode(input io.Reader, output io.Writer) (string, error) {
-	reader := bufio.NewReader(input)
-	for {
-		fmt.Fprint(output, menu)
-		line, err := reader.ReadString('\n')
-		line = strings.TrimSpace(line)
-		switch line {
-		case "0", "":
-			return "", nil
-		case "1":
-			return "quick", nil
-		case "2":
-			return "standard", nil
-		case "3":
-			return "max", nil
-		}
-		if err != nil {
-			if err == io.EOF {
-				return "", nil
+// One input pump serves the whole session, preserving buffered input across
+// menus. Cancellation also releases the caller while a terminal read is idle.
+// At most one read remains blocked until stdin closes or the process exits.
+type console struct {
+	ctx    context.Context
+	lines  <-chan string
+	errors <-chan error
+	out    io.Writer
+	start  func()
+}
+
+func newConsole(ctx context.Context, input io.Reader, output io.Writer) *console {
+	lines := make(chan string)
+	errs := make(chan error, 1)
+	start := func() {
+		go func() {
+			defer close(lines)
+			scanner := bufio.NewScanner(input)
+			for scanner.Scan() {
+				select {
+				case lines <- strings.TrimSpace(scanner.Text()):
+				case <-ctx.Done():
+					return
+				}
 			}
+			if err := scanner.Err(); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	return &console{ctx: ctx, lines: lines, errors: errs, out: output, start: start}
+}
+func (c *console) read(prompt string) (string, error) {
+	if err := c.ctx.Err(); err != nil {
+		return "", err
+	}
+	if c.start != nil {
+		c.start()
+		c.start = nil
+	}
+	fmt.Fprint(c.out, prompt)
+	select {
+	case <-c.ctx.Done():
+		return "", c.ctx.Err()
+	case line, ok := <-c.lines:
+		if !ok {
+			select {
+			case err := <-c.errors:
+				return "", err
+			default:
+				return "", io.EOF
+			}
+		}
+		if strings.ContainsRune(line, '\x03') {
+			return "", context.Canceled
+		}
+		return line, c.ctx.Err()
+	}
+}
+func (c *console) choose(prompt string, choices []string) (string, error) {
+	for {
+		line, err := c.read(prompt)
+		if err != nil {
 			return "", err
 		}
-		fmt.Fprintln(output, "Select 0, 1, 2, or 3.")
+		for _, v := range choices {
+			if line == v {
+				return line, nil
+			}
+		}
+		fmt.Fprintln(c.out, "Invalid selection. Please choose one of the listed numbers.")
+	}
+}
+func finishedInput(err error) bool { return errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) }
+
+// Dependencies are shared with direct commands and injectable for navigation
+// tests. No benchmark engines are invoked by menu tests.
+type automaticActions struct {
+	disk    func(automatic.Options) (automatic.DiskInfo, error)
+	peer    func(string) error
+	execute func(context.Context, automatic.Options) error
+}
+
+func realActions(output, progress io.Writer) automaticActions {
+	return automaticActions{
+		disk: func(o automatic.Options) (automatic.DiskInfo, error) {
+			return automatic.CheckDiskTarget(o, automatic.RealBackend{})
+		},
+		peer: automatic.ValidatePeer,
+		execute: func(ctx context.Context, o automatic.Options) error {
+			if runtime.GOOS != "linux" {
+				return fmt.Errorf("automatic benchmark execution requires Linux")
+			}
+			result, cause := automatic.Run(ctx, o, automatic.RealBackend{}, func(line string) { fmt.Fprintln(progress, presentation.SafeText(line)) })
+			if err := presentation.RenderAutomatic(output, result, o.Details); err != nil {
+				return err
+			}
+			return cause
+		},
 	}
 }
 
-const autoHelp = `Automatic modes: quick | standard | max
-  --disk-path DIRECTORY      Existing writable target; otherwise Disk is skipped
-  --network-peer IP          Trusted remote iperf3 peer; otherwise Network is skipped
+// Essential target input is validated before any workload. A target is never
+// created or substituted; execution repeats filesystem safety checks.
+func prepareTargets(c *console, o *automatic.Options, a automaticActions, interactive bool) (bool, error) {
+	if o.Selects("DISK") {
+		for {
+			if o.DiskPath == "" && interactive {
+				prompt := "Existing benchmark directory (0 to Back): "
+				if o.Component == "" {
+					prompt = "Existing disk target directory (blank to skip Disk, 0 to Back): "
+				}
+				line, err := c.read(prompt)
+				if err != nil {
+					return false, err
+				}
+				if line == "0" {
+					return false, nil
+				}
+				o.DiskPath = line
+				if line == "" && o.Component == "" {
+					break
+				}
+			}
+			if o.DiskPath == "" {
+				if o.Component == "" {
+					break
+				}
+				if !interactive {
+					return false, fmt.Errorf("disk requires --path DIRECTORY")
+				}
+				fmt.Fprintln(c.out, "Enter an existing directory, or 0 to go Back.")
+				continue
+			}
+			info, err := a.disk(*o)
+			if err != nil {
+				if !interactive {
+					return false, err
+				}
+				fmt.Fprintln(c.out, "Invalid disk target: "+presentation.SafeText(err.Error()))
+				o.DiskPath = ""
+				continue
+			}
+			fmt.Fprintf(c.out, "Disk target: %s; filesystem %s; mount %s\n", presentation.SafeText(info.Path), presentation.SafeText(info.Filesystem), presentation.SafeText(info.Mount))
+			if info.System {
+				fmt.Fprintln(c.out, "WARNING: Disk target is on the system filesystem.")
+			}
+			fmt.Fprintln(c.out, "Read tests also write private preparation data.")
+			break
+		}
+	}
+	if o.Selects("NETWORK") {
+		if o.Component == "network" {
+			fmt.Fprintf(c.out, "On the trusted remote server, run: ./vmbench network server --bind SERVER_IP --port %d --non-interactive\nAllow TCP port %d between these hosts. The server must be running before this test.\n", o.Port, o.Port)
+		}
+		for {
+			if o.NetworkPeer == "" {
+				if o.Component == "" {
+					break
+				}
+				if !interactive {
+					return false, fmt.Errorf("network requires --target REMOTE_IP")
+				}
+				line, err := c.read("Remote benchmark server IP (0 to Back): ")
+				if err != nil {
+					return false, err
+				}
+				if line == "0" {
+					return false, nil
+				}
+				o.NetworkPeer = line
+			}
+			err := a.peer(o.NetworkPeer)
+			if err == nil {
+				break
+			}
+			if !interactive {
+				return false, err
+			}
+			fmt.Fprintln(c.out, "Invalid network target: "+presentation.SafeText(err.Error()))
+			o.NetworkPeer = ""
+		}
+	}
+	return true, nil
+}
+func acknowledgeMax(c *console, o *automatic.Options, interactive bool) (bool, error) {
+	if o.Mode != "max" {
+		return true, nil
+	}
+	component := strings.ToUpper(o.Component)
+	if component == "" {
+		component = "CPU, RAM, disk, and network"
+	}
+	fmt.Fprintf(c.out, "MAX PERFORMANCE BENCHMARK\nThis mode will generate high %s load. Other applications may be affected.\n", component)
+	if o.AckMax {
+		return true, nil
+	}
+	if !interactive {
+		return false, fmt.Errorf("noninteractive MAX requires --ack-max; write authorization remains separate")
+	}
+	line, err := c.read("Continue? [y/N]: ")
+	if err != nil {
+		return false, err
+	}
+	if strings.ToLower(line) != "y" {
+		return false, nil
+	}
+	o.AckMax = true
+	return true, nil
+}
+func interactiveSession(ctx context.Context, input io.Reader, output io.Writer, a automaticActions) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	c := newConsole(ctx, input, output)
+	for {
+		component, err := c.choose(menu, []string{"0", "1", "2", "3", "4"})
+		if finishedInput(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if component == "0" {
+			return nil
+		}
+		component = map[string]string{"1": "cpu", "2": "ram", "3": "disk", "4": "network"}[component]
+		for {
+			mode, err := c.choose(fmt.Sprintf(modeMenu, strings.ToUpper(component)), []string{"0", "1", "2", "3"})
+			if finishedInput(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if mode == "0" {
+				break
+			}
+			mode = map[string]string{"1": "quick", "2": "standard", "3": "max"}[mode]
+			o, err := automatic.ParseComponent(component, mode, nil)
+			if err != nil {
+				fmt.Fprintln(output, "Configuration error: "+presentation.SafeText(err.Error()))
+				continue
+			}
+			ready, err := prepareTargets(c, &o, a, true)
+			if finishedInput(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !ready {
+				continue
+			}
+			ready, err = acknowledgeMax(c, &o, true)
+			if finishedInput(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !ready {
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			o.NonInteractive = true
+			err = a.execute(ctx, o)
+			if ctx.Err() != nil {
+				return nil
+			}
+			if err != nil {
+				fmt.Fprintln(output, "Benchmark failed: "+presentation.SafeText(err.Error()))
+			} else {
+				fmt.Fprintln(output, "Benchmark completed.")
+			}
+			next, err := c.choose("\n[1] Back to Main Menu\n[0] Exit\n\nSelect: ", []string{"0", "1"})
+			if finishedInput(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if next == "0" {
+				return nil
+			}
+			break
+		}
+	}
+}
+func runInteractive() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return interactiveSession(ctx, os.Stdin, os.Stdout, realActions(os.Stdout, os.Stderr))
+}
+
+const autoHelp = `Automatic component commands: cpu | ram | disk | network, then quick | standard | max
+  disk MODE --path DIRECTORY / network MODE --target IP
+  --ioengine auto|io_uring|libaio  Disk selection; explicit engines never substitute
+  --disk-path DIRECTORY      Alias for Disk --path; must already exist
+  --network-peer IP          Alias for Network --target; trusted remote server
+  Missing targets prompt on a terminal; --non-interactive requires the target.
+Legacy combined commands: quick | standard | max (missing endpoints are skipped)
   --non-interactive          Never prompt
   --ack-max                  Acknowledge high-intensity MAX load for this invocation
   --include-writes --confirm-writes  Separate optional write-test authorization
@@ -77,58 +374,35 @@ Safety ceilings:
 Advanced component commands remain available; see --help.
 `
 
-func runAutomatic(mode string, args []string) error {
+func runAutomatic(mode string, args []string) error { return runComponentAutomatic("", mode, args) }
+func runComponentAutomatic(component, mode string, args []string) error {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Print(autoHelp)
 		return nil
 	}
-	o, err := automatic.Parse(mode, args)
+	o, err := automatic.ParseComponent(component, mode, args)
 	if err != nil {
 		return err
 	}
-	inputStat, _ := os.Stdin.Stat()
-	interactive := inputStat != nil && inputStat.Mode()&os.ModeCharDevice != 0 && !o.NonInteractive
+	interactive := interactiveStdin() && !o.NonInteractive
 	o.NonInteractive = !interactive
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("automatic benchmark execution requires Linux")
-	}
-	reader := bufio.NewReader(os.Stdin)
-	b := automatic.RealBackend{}
-	if o.DiskPath == "" && interactive {
-		fmt.Print("Existing disk target directory (blank to skip Disk): ")
-		line, _ := reader.ReadString('\n')
-		o.DiskPath = strings.TrimSpace(line)
-	}
-	if o.DiskPath != "" {
-		info, e := b.Filesystem(o.DiskPath)
-		if e != nil {
-			return e
-		}
-		fmt.Fprintf(os.Stderr, "Disk target: %s; filesystem %s; mount %s\n", presentation.SafeText(info.Path), presentation.SafeText(info.Filesystem), presentation.SafeText(info.Mount))
-		if info.System {
-			fmt.Fprintln(os.Stderr, "WARNING: Disk target is on the system filesystem.")
-		}
-		fmt.Fprintln(os.Stderr, "Read tests also write private preparation data.")
-	}
-	if mode == "max" {
-		fmt.Fprintln(os.Stderr, "MAX PERFORMANCE BENCHMARK\nThis mode will generate high CPU, RAM, disk, and network load.\nOther applications may be affected.")
-		if !o.AckMax {
-			if !interactive {
-				return fmt.Errorf("noninteractive MAX requires --ack-max; write authorization remains separate")
-			}
-			fmt.Print("Continue? [y/N]: ")
-			line, _ := reader.ReadString('\n')
-			if strings.ToLower(strings.TrimSpace(line)) != "y" {
-				return nil
-			}
-			o.AckMax = true
-		}
-	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	result, cause := automatic.Run(ctx, o, b, func(line string) { fmt.Fprintln(os.Stderr, presentation.SafeText(line)) })
-	if err = presentation.RenderAutomatic(os.Stdout, result, o.Details); err != nil {
+	c := newConsole(ctx, os.Stdin, os.Stdout)
+	a := realActions(os.Stdout, os.Stderr)
+	ready, err := prepareTargets(c, &o, a, interactive)
+	if finishedInput(err) {
+		return nil
+	}
+	if err != nil || !ready {
 		return err
 	}
-	return cause
+	ready, err = acknowledgeMax(c, &o, interactive)
+	if finishedInput(err) {
+		return nil
+	}
+	if err != nil || !ready {
+		return err
+	}
+	return a.execute(ctx, o)
 }

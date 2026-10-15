@@ -48,13 +48,30 @@ func TestInspectRejectsForeignELF(t *testing.T) {
 	}
 }
 
-func TestAsyncEngineRequiresCompilationAndPermission(t *testing.T) {
-	for _, c := range []struct {
-		compiled         string
-		uring, aio, want bool
-	}{{"io_uring", false, true, false}, {"io_uring libaio", false, true, true}, {"libaio", true, false, false}, {"io_uring libaio", true, false, true}, {"sync", true, true, false}} {
-		if got := usableAsync(c.compiled, c.uring, c.aio); got != c.want {
-			t.Fatalf("%+v: got %v", c, got)
+func TestAsyncCandidateStatuses(t *testing.T) {
+	for _, test := range []struct {
+		names        string
+		uring, aio   bool
+		wantU, wantA string
+	}{
+		{"io_uring libaio", true, true, AvailableNotValidated, AvailableNotValidated},
+		{"io_uring libaio", false, true, Unavailable, AvailableNotValidated},
+		{"sync", true, true, Unavailable, Unavailable},
+		{"io_uring", false, true, Unavailable, Unavailable},
+	} {
+		caps := AsyncCapabilities(test.names, test.uring, "operation not permitted", test.aio, "setup only")
+		if caps[0].Status != test.wantU || caps[1].Status != test.wantA {
+			t.Fatal(test, caps)
+		}
+		for _, c := range caps {
+			if c.Status == Ready {
+				t.Fatal("setup probe claimed completed I/O", c)
+			}
+		}
+	}
+	for input, want := range map[string]string{"0": "other runtime restrictions", "1": "CAP_SYS_ADMIN", "2": "disabled for all", "invalid": "unrecognized"} {
+		if got := DescribeUringPolicy(input, "1000"); !strings.Contains(got, want) {
+			t.Fatal(input, got)
 		}
 	}
 }

@@ -195,8 +195,8 @@ func (c Config) Validate() error {
 	if _, e := Bytes(c.FileSize); e != nil {
 		return e
 	}
-	if c.Engine != "io_uring" && c.Engine != "libaio" {
-		return fmt.Errorf("only asynchronous io_uring and libaio engines supported")
+	if c.Engine != "auto" && c.Engine != "io_uring" && c.Engine != "libaio" {
+		return fmt.Errorf("only auto selection or asynchronous io_uring and libaio engines supported")
 	}
 	switch c.Profile {
 	case "randread-4k", "randwrite-4k", "mixed-70-30", "seqread-1m", "seqwrite-1m", "latency", "qd-scaling":

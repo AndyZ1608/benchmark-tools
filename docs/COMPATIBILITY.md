@@ -27,3 +27,19 @@ The [recorded dependency review](RELEASE-AUDIT.md) retains exact source revision
 All other named distributions remain unverified locally. Native ARM64 CPU/RAM execution, XFS/Btrfs, real remote-network throughput and glibc/other-build redistribution reviews remain outstanding. No production-ready universal Linux archive is claimed.
 
 Use `python3 scripts/compatibility-test.py --workloads --output compatibility-result.json` in a disposable Linux environment. Add `--install` only when package installation is authorized. It records OS, architecture, environment and individual phase outputs even when a phase fails. The CI workflow also records setup failures when repositories/images are unavailable.
+
+
+## RHEL 9.6 user report and async validation repair - 2026-10-15
+
+Reported host: Red Hat Enterprise Linux 9.6, x86_64, kernel `5.14.0-570.12.1.el9_6.x86_64`, glibc 2.34/dnf; Go 1.23.12, fio 3.35, stress-ng 0.19.03, iperf3 3.9. The user reports successful compilation/preparation, followed by initialization failure: io_uring setup returned EPERM while Linux AIO setup/destruction succeeded without submitting I/O. These are separate observations; **functional RHEL Disk benchmarking remains unverified**.
+
+The old doctor gate required both an exact compiled fio engine name and a successful matching setup syscall. Given AIO setup success, the reported error means the running fio query did not supply the exact accepted `libaio` token to that gate. The report does not include `fio --enghelp`, so a missing compiled engine versus different output cannot be determined remotely. Successful kernel `io_setup` cannot establish fio's build capabilities, completed direct I/O, or achieved queue depth. Treating this Disk capability gate as a fatal whole-application installation condition was the interface defect.
+
+The repair preserves executable/ELF/library integrity failures as fatal initialization errors. Async candidates have independent status, and filesystem validation is deferred until an explicit Disk target is selected. Automatic selection functionally tests io_uring first, then libaio; explicit requests never substitute. A private populated/synchronized file, bounded direct reads, completed-I/O counters and achieved depth establish target-specific capability. A setup-only success never means READY. No synchronous replacement is used; failed or underachieved Disk results are rejected without disabling independent CPU/RAM/Network operations.
+
+Policy diagnostics follow the [Linux kernel sysctl definitions](https://www.kernel.org/doc/html/latest/admin-guide/sysctl/kernel.html): `io_uring_disabled=0` permits setup through that sysctl only; `1` restricts creation to CAP_SYS_ADMIN or the configured `io_uring_group`; `2` disables creation for everyone. Missing sysctls and seccomp/SELinux/kernel restrictions remain possible; the actual setup result is recorded. VMBench changes none of these settings. [fio documents direct I/O and achieved-depth requirements](https://fio.readthedocs.io/en/latest/fio_doc.html#cmdoption-arg-iodepth); compiled engines, setup permission, completed I/O and achieved queueing are distinct checks.
+
+This repair is tested with controlled kernel/engine fixtures and the separately documented disposable Linux test environment. It is not a claim of fresh real RHEL 9.6 installation, workload, XFS/Btrfs, or release qualification. Other distributions' existing qualification levels remain unchanged.
+
+
+The completed-I/O counters and bounded `number_ios` option were also checked against the upstream fio 3.35 [JSON statistics implementation](https://raw.githubusercontent.com/axboe/fio/fio-3.35/stat.c) and [option definitions](https://raw.githubusercontent.com/axboe/fio/fio-3.35/options.c). This source-interface check does not substitute for execution of the RHEL-packaged binary.

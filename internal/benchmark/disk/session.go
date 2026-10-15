@@ -80,7 +80,7 @@ func OpenSession(ctx context.Context, c config.Config, reserve uint64) (_ *Sessi
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{target: target, Lifecycle: Lifecycle{Target: metadata["path"].(string), Workspace: target.Dir, FileBytes: target.Plan.FileBytes, TotalBytes: target.Plan.TotalBytes, Jobs: c.Jobs, Seed: seed}}
+	s := &Session{target: target, Lifecycle: Lifecycle{Target: metadata["path"].(string), Workspace: target.Dir, Engine: c.Engine, FileBytes: target.Plan.FileBytes, TotalBytes: target.Plan.TotalBytes, Jobs: c.Jobs, Seed: seed}}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, s.Close())
@@ -100,6 +100,9 @@ func OpenSession(ctx context.Context, c config.Config, reserve uint64) (_ *Sessi
 func (s *Session) Measure(ctx context.Context, c config.Config) (Outcome, error) {
 	if s.closed {
 		return Outcome{}, fmt.Errorf("disk session is closed")
+	}
+	if c.Engine != s.Lifecycle.Engine {
+		return Outcome{}, fmt.Errorf("selected I/O engine changed within the prepared session; refusing mixed-engine results")
 	}
 	if err := c.Validate(); err != nil {
 		return Outcome{}, err
@@ -122,7 +125,28 @@ func (s *Session) Close() error {
 // depth buckets. Bucket labels are ranges, not exact achieved mean queue depths.
 func ExecutionEvidence(result Result, engine string, requested int) (string, error) {
 	var descriptions []string
+	if requested < 1 {
+		return "", fmt.Errorf("invalid requested I/O depth")
+	}
 	for i, job := range result.Jobs {
+		if job.Error != 0 {
+			return "", fmt.Errorf("job %d returned fio I/O error %d", i+1, job.Error)
+		}
+		active := false
+		for _, v := range []Direction{job.Read, job.Write} {
+			if math.IsNaN(v.IOPS) || math.IsInf(v.IOPS, 0) || v.IOPS < 0 {
+				return "", fmt.Errorf("invalid fio IOPS")
+			}
+			if v.IOPS > 0 {
+				active = true
+				if v.TotalIOs == 0 || v.IOBytes == 0 || v.ShortIOs != 0 || v.DropIOs != 0 {
+					return "", fmt.Errorf("job %d missing valid completed I/O counters", i+1)
+				}
+			}
+		}
+		if !active {
+			return "", fmt.Errorf("job %d completed no measured I/O", i+1)
+		}
 		actual := job.Options["ioengine"]
 		if actual == "" {
 			actual = result.Options["ioengine"]
@@ -130,14 +154,21 @@ func ExecutionEvidence(result Result, engine string, requested int) (string, err
 		if actual != engine || (actual != "io_uring" && actual != "libaio") {
 			return "", fmt.Errorf("job %d effective fio engine %q differs from selected %q", i+1, actual, engine)
 		}
-		total, dominant, best := 0.0, "", -1.0
+		total, dominant, best, meaningful := 0.0, "", -1.0, 0.0
 		for label, pct := range job.Depth {
 			if pct < 0 || pct > 100 || math.IsNaN(pct) || math.IsInf(pct, 0) {
 				return "", fmt.Errorf("invalid achieved I/O depth distribution")
 			}
-			_, e := strconv.Atoi(strings.TrimPrefix(label, ">="))
-			if e != nil {
+			bucket, e := strconv.Atoi(strings.TrimPrefix(label, ">="))
+			if e != nil || !(label == "1" || label == "2" || label == "4" || label == "8" || label == "16" || label == "32" || label == ">=64") {
 				return "", fmt.Errorf("unknown fio depth bucket %q", label)
+			}
+			threshold := 2
+			for threshold*2 <= requested/2 {
+				threshold *= 2
+			}
+			if bucket >= threshold {
+				meaningful += pct
 			}
 			total += pct
 			if pct > best {
@@ -145,13 +176,12 @@ func ExecutionEvidence(result Result, engine string, requested int) (string, err
 				dominant = label
 			}
 		}
-		if total < 90 || total > 110 {
+		if total < 99 || total > 101 {
 			return "", fmt.Errorf("missing or incomplete achieved I/O depth distribution")
 		}
 		descriptions = append(descriptions, fmt.Sprintf("job %d: bucket %s %.1f%%", i+1, dominant, best))
-		bucket, _ := strconv.Atoi(strings.TrimPrefix(dominant, ">="))
-		if requested > 1 && bucket > 0 && bucket < requested/2 && best >= 80 {
-			descriptions = append(descriptions, "WARNING: requested depth was not predominantly achieved")
+		if requested > 1 && meaningful < 50 {
+			return "", fmt.Errorf("measurement limitation: %s requested QD%d but job %d achieved insufficient asynchronous depth (%.1f%% near requested range, dominant bucket %s %.1f%%); refusing misleading results", engine, requested, i+1, meaningful, dominant, best)
 		}
 	}
 	if len(descriptions) == 0 {

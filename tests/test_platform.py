@@ -10,6 +10,17 @@ class Platform(unittest.TestCase):
    p=pathlib.Path(d)/'os-release';p.write_text(release)
    script='set -Eeuo pipefail; ROOT='+"'"+path(ROOT)+"'"+'; source "$ROOT/scripts/bootstrap-common.sh"; uname(){ case "$1" in -s) echo Linux;; -m) echo x86_64;; -r) echo fixture-kernel;; esac; }; detect_linux; '+body
    return subprocess.run([BASH,'--noprofile','--norc','-c',script],env=dict(os.environ,VMBENCH_OS_RELEASE=path(p)),text=True,capture_output=True,timeout=25)
+ def test_readme_and_script_permissions(self):
+  text=(ROOT/'README.md').read_text()
+  for snippet in ['chmod +x init.sh start.sh','./init.sh','./init.sh --rebuild','bash start.sh']:
+   self.assertIn(snippet,text)
+  for name in ['init.sh','start.sh']:
+   if os.name!='nt':self.assertEqual((ROOT/name).stat().st_mode & 0o111,0o111)
+ def test_git_script_modes(self):
+  if not (ROOT/'.git').exists() or not shutil.which('git'):self.skipTest('requires Git checkout and Git executable')
+  result=subprocess.run(['git','ls-files','--stage','init.sh','start.sh'],cwd=ROOT,text=True,capture_output=True,check=True)
+  self.assertEqual(len(result.stdout.splitlines()),2)
+  for line in result.stdout.splitlines():self.assertTrue(line.startswith('100755 '),line)
  def test_family_mapping(self):
   for identity,pm in [('ubuntu','apt-get'),('debian','apt-get'),('rocky','dnf'),('almalinux','dnf'),('rhel','dnf'),('centos','dnf'),('fedora','dnf'),('opensuse-leap','zypper'),('opensuse-tumbleweed','zypper'),('sles','zypper'),('arch','pacman'),('alpine','apk')]:
    with self.subTest(identity=identity):

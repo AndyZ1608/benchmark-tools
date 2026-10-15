@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,8 @@ type fakeBackend struct {
 	cancel                 context.CancelFunc
 	free                   uint64
 	networkConfigs         []config.Config
+	selectedEngine         string
+	engineFailure          bool
 }
 
 func (f *fakeBackend) Detect() system.Info {
@@ -69,8 +72,14 @@ func (f *fakeBackend) Filesystem(path string) (DiskInfo, error) {
 	}
 	return DiskInfo{Path: path, Filesystem: "fixture", Mount: "/temporary", Free: free}, nil
 }
-func (f *fakeBackend) Engines(context.Context) ([]string, error) {
-	return []string{"libaio", "io_uring"}, nil
+func (f *fakeBackend) SelectDiskEngine(context.Context, config.Config, uint64) (string, error) {
+	if f.engineFailure {
+		return "", fmt.Errorf("io_uring: operation not permitted; libaio: submitted I/O failed")
+	}
+	if f.selectedEngine != "" {
+		return f.selectedEngine, nil
+	}
+	return "io_uring", nil
 }
 func (f *fakeBackend) OpenDisk(ctx context.Context, c config.Config, reserve uint64) (DiskSession, error) {
 	f.events = append(f.events, "disk-open")
@@ -90,8 +99,12 @@ func (f *fakeBackend) Measure(ctx context.Context, c config.Config) (disk.Outcom
 	}
 	r := disk.Result{Options: map[string]string{"ioengine": c.Engine}}
 	for i := 0; i < c.Jobs; i++ {
-		v := disk.Direction{IOPS: score / float64(c.Jobs), BWBytes: score * 4096 / float64(c.Jobs), Runtime: float64(c.Duration * 1000), Completion: disk.Latency{Mean: 100000, Percentile: map[string]float64{"99.000000": float64(1000000 + c.Depth*1000)}}}
-		r.Jobs = append(r.Jobs, disk.Job{Read: v, Write: v, Depth: map[string]float64{fmt.Sprint(c.Depth): 100}})
+		v := disk.Direction{TotalIOs: 100, IOBytes: 409600, IOPS: score / float64(c.Jobs), BWBytes: score * 4096 / float64(c.Jobs), Runtime: float64(c.Duration * 1000), Completion: disk.Latency{Mean: 100000, Percentile: map[string]float64{"99.000000": float64(1000000 + c.Depth*1000)}}}
+		bucket := fmt.Sprint(c.Depth)
+		if c.Depth >= 64 {
+			bucket = ">=64"
+		}
+		r.Jobs = append(r.Jobs, disk.Job{Read: v, Write: v, Depth: map[string]float64{bucket: 100}})
 	}
 	return disk.Outcome{Results: []disk.Result{r}}, nil
 }
@@ -361,5 +374,167 @@ func TestSaturationBoundaryInvalidMetricsAndDeadline(t *testing.T) {
 	_, err = Run(ctx, Defaults("quick"), &fakeBackend{}, nil)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
+	}
+}
+
+func TestScopedControllerRunsOnlySelectedComponent(t *testing.T) {
+	for _, component := range []string{"cpu", "ram", "disk", "network"} {
+		for _, mode := range []string{"quick", "standard", "max"} {
+			t.Run(component+"/"+mode, func(t *testing.T) {
+				o := Defaults(mode)
+				o.Component = component
+				o.AckMax = true
+				// Even explicitly supplied unrelated endpoints must never run.
+				o.DiskPath = "/fixture"
+				o.NetworkPeer = "10.0.0.20"
+				f := &fakeBackend{}
+				r, err := Run(context.Background(), o, f, nil)
+				if err != nil || r.Status != "COMPLETED" {
+					t.Fatal(err, r.Status, r.Errors)
+				}
+				module := strings.ToUpper(component)
+				if module == "RAM" {
+					module = "MEMORY"
+				}
+				if len(r.States) != 1 || r.States[module] != "COMPLETED" {
+					t.Fatal(r.States)
+				}
+				if len(f.events) == 0 {
+					t.Fatal("selected workload did not execute")
+				}
+				for _, event := range f.events {
+					if event != component && !(component == "disk" && event == "disk-open") {
+						t.Fatalf("%s invoked %s", component, event)
+					}
+				}
+				if component == "disk" {
+					if f.opened != 1 || f.closed != 1 || !r.DiskCleaned {
+						t.Fatal("disk cleanup not retained", r)
+					}
+				} else if f.opened != 0 || len(f.configs) != 0 {
+					t.Fatal("unselected disk opened")
+				}
+				if component != "ram" {
+					for _, w := range r.Warnings {
+						if strings.Contains(w, "main memory bandwidth") || strings.Contains(w, "NUMA") {
+							t.Fatal("unrelated RAM warning", w)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+func TestScopedParsingTargetsAndSharedConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auto.yaml")
+	if err := os.WriteFile(path, []byte("disk-path: /configured\nnetwork-peer: 10.0.0.30\ninclude-writes: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, component := range []string{"cpu", "ram", "network"} {
+		args := []string{"--config", path}
+		if component == "network" {
+			args = append(args, "--target", "10.0.0.20")
+		}
+		o, err := ParseComponent(component, "quick", args)
+		if err != nil || o.Component != component || o.DiskPath != "" || o.IncludeWrites || o.ConfirmWrites {
+			t.Fatal(o, err)
+		}
+		if component == "network" && o.NetworkPeer != "10.0.0.20" || component != "network" && o.NetworkPeer != "" {
+			t.Fatal(o)
+		}
+	}
+	o, err := ParseComponent("disk", "max", []string{"--config", path, "--path", "/data with spaces", "--confirm-writes"})
+	if err != nil || o.DiskPath != "/data with spaces" || o.NetworkPeer != "" || !o.IncludeWrites || !o.ConfirmWrites {
+		t.Fatal(o, err)
+	}
+	if _, err := ParseComponent("disk", "quick", []string{"--config", path}); err == nil {
+		t.Fatal("write acknowledgment bypassed")
+	}
+	if _, err := ParseComponent("full", "quick", nil); err == nil {
+		t.Fatal("invalid scope accepted")
+	}
+	for _, component := range []string{"disk", "network"} {
+		o := Defaults("quick")
+		o.Component = component
+		f := &fakeBackend{}
+		if _, err := Run(context.Background(), o, f, nil); err == nil || len(f.events) > 0 {
+			t.Fatal("missing target generated load", component, err, f.events)
+		}
+	}
+}
+func TestDiskPreflightDoesNotPrepareData(t *testing.T) {
+	o := Defaults("max")
+	o.Component = "disk"
+	o.DiskPath = "/fixture"
+	for _, free := range []uint64{1 << 30, 1<<30 + 32<<20, 16 << 30} {
+		f := &fakeBackend{free: free}
+		_, err := CheckDiskTarget(o, f)
+		if (free < 2<<30) != (err != nil) {
+			t.Fatal(free, err)
+		}
+		if len(f.events) != 0 || f.opened != 0 {
+			t.Fatal("preflight wrote data", f.events)
+		}
+	}
+}
+func TestRemotePeerValidation(t *testing.T) {
+	for _, peer := range []string{"", "example.com", "127.0.0.1", "::1", "0.0.0.0", "::", "224.0.0.1", "255.255.255.255"} {
+		if err := ValidatePeer(peer); err == nil {
+			t.Fatal("unsafe peer accepted", peer)
+		}
+	}
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range addresses {
+		ip, _, err := net.ParseCIDR(address.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidatePeer(ip.String()); err == nil {
+			t.Fatal("local interface accepted", ip)
+		}
+	}
+}
+
+func TestDiskEngineFailureDoesNotDisableIndependentModules(t *testing.T) {
+	o := Defaults("quick")
+	o.DiskPath = "/fixture"
+	o.NetworkPeer = "10.0.0.20"
+	f := &fakeBackend{engineFailure: true}
+	r, err := Run(context.Background(), o, f, nil)
+	if err == nil || r.States["DISK"] != "FAILED" || f.opened != 0 || len(r.Disk) != 0 {
+		t.Fatal(r, err)
+	}
+	for _, module := range []string{"CPU", "MEMORY", "NETWORK"} {
+		if r.States[module] != "COMPLETED" {
+			t.Fatal(module, r.States)
+		}
+	}
+	for _, engine := range []string{"io_uring", "libaio"} {
+		f := &fakeBackend{selectedEngine: engine}
+		o.Component = "disk"
+		r, err := Run(context.Background(), o, f, nil)
+		if err != nil || r.DiskInfo.Engine != engine {
+			t.Fatal(r, err)
+		}
+		for _, c := range f.configs {
+			if c.Engine != engine {
+				t.Fatal("engines mixed within run", c)
+			}
+		}
+	}
+}
+
+func TestAutomaticDiskEngineOptions(t *testing.T) {
+	for _, engine := range []string{"auto", "io_uring", "libaio"} {
+		o, err := ParseComponent("disk", "quick", []string{"--path", "/fixture", "--ioengine", engine})
+		if err != nil || o.DiskEngine != engine {
+			t.Fatal(o, err)
+		}
+	}
+	if _, err := ParseComponent("disk", "quick", []string{"--ioengine", "sync"}); err == nil {
+		t.Fatal("synchronous fallback accepted")
 	}
 }

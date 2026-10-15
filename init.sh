@@ -161,7 +161,8 @@ run_smoke_tests() {
     log CHECK 'CLI help/version and engine version/capability checks'
     timeout 10 "$STAGE/vmbench" --help >/dev/null
     timeout 10 "$STAGE/vmbench" --version >/dev/null
-    timeout 30 "$STAGE/vmbench" doctor
+    timeout 30 "$STAGE/vmbench" doctor > "$STAGE/runtime-capabilities.txt" || { cat "$STAGE/runtime-capabilities.txt"; return 1; }
+    cat "$STAGE/runtime-capabilities.txt"
 }
 run_unit_tests() {
     log CHECK "Go unit tests using $GO_SELECTED"
@@ -194,7 +195,7 @@ save_installation_state() {
         printf ',\n  "build_status": {"cli_built": %s, "native_built": %s}' "$BUILD_CLI" "$BUILD_NATIVE"
         printf ',\n  "initialized_at": '; json_string "$(date -u +%FT%TZ)"
         printf ',\n  "source_fingerprint": '; json_string "$full"
-        printf ',\n  "portability": "runtime validated on this host; standalone release qualification not implied",\n  "engines": {\n'
+        printf ',\n  "portability": "executables validated on this host; Disk direct I/O/depth validation deferred to selected target; standalone release qualification not implied",\n  "engines": {\n'
         for i in "${!VERSION_NAMES[@]}"; do
             (( i == 0 )) || printf ',\n'
             printf '    '; json_string "${VERSION_NAMES[i]}"; printf ': {"version": '; json_string "${VERSION_VALUES[i]}"; printf ', "linkage": '; json_string "${LINKAGES[i]}"
@@ -273,10 +274,11 @@ main() {
     INITIALIZATION_PHASE='engine runtime validation'
     validate_engine_dependencies
     run_step 'Safe runtime checks' run_smoke_tests
+    if (( ! VERBOSE )); then cat "$STAGE/runtime-capabilities.txt"; fi
     if (( BUILD_CLI )); then run_step 'Go unit tests' run_unit_tests; fi
     INITIALIZATION_PHASE='publishing validated installation'
     save_installation_state
-    log SUCCESS 'VMBench initialization completed. Run ./vmbench quick, standard, or max.'
+    log SUCCESS 'VMBench initialization completed. Run ./vmbench to select a component and mode.'
     log INFO 'Ready on this host. System-linked engines do not constitute a portable offline release.'
 }
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

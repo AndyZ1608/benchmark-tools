@@ -53,7 +53,12 @@ validate_binary() {
         stress-ng) [[ $output == stress-ng* ]] ;;
         iperf3) [[ $output == iperf\ 3.* ]] ;;
     esac || { fail "$name returned an incompatible version: $output"; return 1; }
-    [[ $name != fio ]] || timeout 10 "$binary" --enghelp 2>&1 | grep -qE '(^|[[:space:]])(io_uring|libaio)([[:space:]]|$)' || { fail 'fio needs io_uring or libaio asynchronous I/O support; synchronous fallback is prohibited'; return 1; }
+    # Executable health is mandatory; async engines are independent Disk capabilities.
+    # Capture first so an execution/loader error cannot be hidden by a matching token.
+    if [[ $name == fio ]]; then
+        local engine_help
+        engine_help=$(timeout 10 "$binary" --enghelp 2>&1) || { fail "fio engine query failed: $engine_help"; return 1; }
+    fi
     ENGINE_VERSION=$output
     ENGINE_LINKAGE=$linked
 }

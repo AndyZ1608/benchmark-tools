@@ -40,3 +40,35 @@ func TestAutomaticCompactOutputUsesOnlyConfirmedPeaks(t *testing.T) {
 		t.Fatal("unconfirmed maximum shown", b.String())
 	}
 }
+
+func TestScopedSummaryHasOnlySelectedResultsAndCeilings(t *testing.T) {
+	for _, component := range []string{"cpu", "ram", "disk", "network"} {
+		o := automatic.Defaults("max")
+		o.Component = component
+		r := automatic.Result{Mode: "max", Status: "COMPLETED", Limits: o, States: map[string]string{"CPU": "COMPLETED", "MEMORY": "COMPLETED", "DISK": "COMPLETED", "NETWORK": "COMPLETED"}}
+		var out bytes.Buffer
+		if err := RenderAutomatic(&out, r, false); err != nil {
+			t.Fatal(err)
+		}
+		text := out.String()
+		for _, other := range []string{"cpu", "ram", "disk", "network"} {
+			heading := strings.ToUpper(other) + " - COMPLETED"
+			if strings.Contains(text, heading) != (component == other) {
+				t.Fatal(heading, text)
+			}
+		}
+		for _, ceiling := range []struct{ component, label string }{{"ram", "RAM allocation ceiling:"}, {"disk", "Disk ceilings:"}, {"network", "Network ceilings:"}} {
+			if strings.Contains(text, ceiling.label) != (component == ceiling.component) {
+				t.Fatal(ceiling.label, text)
+			}
+		}
+		if strings.Contains(text, "SKIPPED") || strings.Contains(text, "{\"") {
+			t.Fatal(text)
+		}
+		for _, c := range text {
+			if c > 127 {
+				t.Fatal("non-ASCII summary")
+			}
+		}
+	}
+}

@@ -100,6 +100,11 @@ func invoke(ctx context.Context, path string, args ...string) (string, error) {
 
 // Doctor performs version and capability queries only: no benchmarks, files, network or servers.
 func Doctor(ctx context.Context, output io.Writer, root string) error {
+	uringOK, uringReason := IOUring()
+	aioOK, aioReason := LinuxAIO()
+	return doctor(ctx, output, root, uringOK, uringReason, aioOK, aioReason)
+}
+func doctor(ctx context.Context, output io.Writer, root string, uringOK bool, uringReason string, aioOK bool, aioReason string) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("runtime validation requires Linux")
 	}
@@ -119,8 +124,6 @@ func Doctor(ctx context.Context, output io.Writer, root string) error {
 	fmt.Fprintf(output, "OS: %s; linux/%s; kernel %s\n", safe(pretty), runtime.GOARCH, safe(strings.TrimSpace(string(kernel))))
 	fmt.Fprintln(output, "Qualification: runtime diagnostics on this host; distribution certification is separate.")
 	var failures []string
-	uringOK, uringReason := IOUring()
-	aioOK, aioReason := LinuxAIO()
 	for _, entry := range []struct{ name, prefix string }{{"compute-bench", "compute-bench-v1"}, {"fio", "fio-"}, {"stress-ng", "stress-ng"}, {"iperf3", "iperf 3."}} {
 		path := filepath.Join(root, "engines", entry.name)
 		linkage, err := Inspect(path, runtime.GOARCH)
@@ -134,8 +137,12 @@ func Doctor(ctx context.Context, output io.Writer, root string) error {
 		if err == nil && entry.name == "fio" {
 			var help string
 			help, err = invoke(ctx, path, "--enghelp")
-			if err == nil && !usableAsync(help, uringOK, aioOK) {
-				err = fmt.Errorf("fio needs a permitted compiled asynchronous engine: io_uring=%s; Linux AIO=%s; synchronous fallback is prohibited", uringReason, aioReason)
+			if err == nil {
+				fmt.Fprintln(output, "VMBench Runtime Validation (no filesystem I/O)")
+				for _, capability := range AsyncCapabilities(help, uringOK, uringReason, aioOK, aioReason) {
+					fmt.Fprintf(output, "%s: %s - %s\n", capability.Name, capability.Status, safe(capability.Detail))
+				}
+				fmt.Fprintln(output, "[INFO] Disk validation deferred until an explicit target directory is selected; no synchronous fallback.")
 			}
 		}
 		if err == nil && entry.name == "iperf3" {
@@ -152,12 +159,15 @@ func Doctor(ctx context.Context, output io.Writer, root string) error {
 		}
 		if err != nil {
 			failures = append(failures, entry.name+": "+err.Error())
-			fmt.Fprintf(output, "[ERROR] %s: %s\n", entry.name, safe(err.Error()))
+			fmt.Fprintf(output, "[ERROR] %s: FAILED - %s\n", entry.name, safe(err.Error()))
 			continue
 		}
 		scan := bufio.NewScanner(strings.NewReader(version))
 		scan.Scan()
-		fmt.Fprintf(output, "[OK] %s: %s; %s\n", entry.name, safe(scan.Text()), safe(linkage))
+		fmt.Fprintf(output, "[OK] %s: READY - %s; %s\n", entry.name, safe(scan.Text()), safe(linkage))
+		if entry.name == "compute-bench" {
+			fmt.Fprintln(output, "CPU engine: READY\nMemory engine: READY")
+		}
 	}
 	fmt.Fprintf(output, "io_uring setup permitted: %t (%s).\n", uringOK, safe(uringReason))
 	fmt.Fprintf(output, "Linux AIO permitted: %t (%s); per-filesystem direct I/O must still succeed.\n", aioOK, safe(aioReason))
@@ -205,13 +215,40 @@ func verifyManifest(root string) error {
 	}
 	return nil
 }
-func usableAsync(s string, uringOK, aioOK bool) bool {
-	for _, f := range strings.Fields(s) {
-		if (f == "io_uring" && uringOK) || (f == "libaio" && aioOK) {
-			return true
+
+type Capability struct{ Name, Status, Detail string }
+
+const (
+	Ready                 = "READY"
+	AvailableNotValidated = "AVAILABLE_NOT_VALIDATED"
+	Unavailable           = "UNAVAILABLE"
+	Failed                = "FAILED"
+)
+
+// AsyncCapabilities distinguishes compiled names and setup permission from real
+// direct I/O. Only a target-specific completed-I/O test can establish readiness.
+func AsyncCapabilities(compiled string, uringOK bool, uringReason string, aioOK bool, aioReason string) []Capability {
+	out := []Capability{}
+	for _, probe := range []struct {
+		name      string
+		permitted bool
+		reason    string
+	}{{"io_uring", uringOK, uringReason}, {"libaio", aioOK, aioReason}} {
+		c := Capability{Name: probe.name, Status: Unavailable, Detail: "not advertised by fio --enghelp"}
+		for _, name := range strings.Fields(compiled) {
+			if name != probe.name {
+				continue
+			}
+			c.Detail = probe.reason
+			if probe.permitted {
+				c.Status = AvailableNotValidated
+				c.Detail += "; requires filesystem-specific direct I/O and achieved-depth validation"
+			}
+			break
 		}
+		out = append(out, c)
 	}
-	return false
+	return out
 }
 
 // HasOption accepts documented short/long aliases, without substring matches.
@@ -226,4 +263,25 @@ func HasOption(help string, aliases ...string) bool {
 		}
 	}
 	return false
+}
+
+// DescribeUringPolicy reports policy only. A zero sysctl does not override
+// seccomp, SELinux, capabilities, kernel support, or the setup syscall result.
+func DescribeUringPolicy(disabled, group string) string {
+	switch disabled {
+	case "0":
+		return "io_uring_disabled=0 (sysctl permits setup; other runtime restrictions may apply)"
+	case "1":
+		if group == "-1" || group == "4294967295" {
+			return "io_uring_disabled=1 (requires CAP_SYS_ADMIN; io_uring_group=-1 grants no group exemption; actual setup permission is probed)"
+		}
+		if group == "" {
+			group = "unavailable"
+		}
+		return fmt.Sprintf("io_uring_disabled=1 (requires CAP_SYS_ADMIN or membership in io_uring_group=%s; actual setup permission is probed)", group)
+	case "2":
+		return "io_uring_disabled=2 (setup disabled for all processes)"
+	default:
+		return "unrecognized io_uring_disabled=" + disabled + "; actual setup permission is probed"
+	}
 }

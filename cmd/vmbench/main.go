@@ -29,9 +29,12 @@ import (
 )
 
 const helpBody = ` - offline Linux VM benchmarking
-Primary commands: quick | standard | max
+Run without arguments to select CPU, RAM, DISK or NETWORK, then a mode.
+Primary commands: cpu|ram|disk|network quick|standard|max
+  disk MODE --path DIRECTORY; network MODE --target REMOTE_IP
+Legacy combined commands: quick | standard | max
   quick: fast preliminary check; standard: repeated evaluation; max: bounded discovery
-  Use MODE --help for automatic options, --disk-path and --network-peer.
+  Use COMPONENT MODE --help for automatic options and resource ceilings.
 Advanced commands: cpu test | cpu stress | ram test | ram stress | disk test
                    network server | network test | full test | system info | version | doctor
 Flags: --version|-v | --help
@@ -40,7 +43,7 @@ Flags: --version|-v | --help
        --size BYTES (RAM dataset; disk per job) --path DIRECTORY
        --file-size 1GiB (disk alias) --data-seed random|N --confirm-writes
        --profile randread-4k|randwrite-4k|mixed-70-30|seqread-1m|seqwrite-1m|latency|qd-scaling
-       --ioengine io_uring|libaio --iodepth N --numjobs N --target IP
+       --ioengine auto|io_uring|libaio --iodepth N --numjobs N --target IP
        --bind IP --port N --streams N --udp --bitrate 100M --reverse --bidir
        --details --stability-cv 5 --steal-warning-percent 1
 `
@@ -56,14 +59,10 @@ func main() {
 func run() error {
 	a := os.Args[1:]
 	if len(a) == 0 {
-		mode, err := selectMode(os.Stdin, os.Stdout)
-		if err != nil {
-			return err
-		}
-		if mode == "" {
-			return nil
-		}
-		a = []string{mode}
+		return runInteractive()
+	}
+	if len(a) >= 2 && (a[0] == "cpu" || a[0] == "ram" || a[0] == "disk" || a[0] == "network") && (a[1] == "quick" || a[1] == "standard" || a[1] == "max") {
+		return runComponentAutomatic(a[0], a[1], a[2:])
 	}
 	if len(a) > 0 && (a[0] == "quick" || a[0] == "standard" || a[0] == "max") {
 		return runAutomatic(a[0], a[1:])
