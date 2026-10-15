@@ -1,11 +1,13 @@
-import pathlib, subprocess, sys
-root=pathlib.Path(sys.argv[1]).resolve()
-for name in ['vmbench','engines/fio','engines/stress-ng','engines/iperf3','engines/compute-bench']:
-    p=root/name
-    b=p.read_bytes()
-    if b[:4]!=b'\x7fELF': raise SystemExit(f'{name}: not ELF')
-    headers=subprocess.check_output(['readelf','-l',str(p)],text=True)
-    dynamic=subprocess.check_output(['readelf','-d',str(p)],text=True)
-    if 'INTERP' in headers or '(NEEDED)' in dynamic: raise SystemExit(f'{name}: release requires static engines')
-    subprocess.run([str(p),'--version'],check=True,timeout=10)
-print('All executables validated as static and runnable on build host; Ubuntu target smoke checks remain required.')
+#!/usr/bin/env python3
+"""Read-only validation of a staged portable release (does not qualify other hosts)."""
+import argparse,pathlib,subprocess
+from release import inspect,ENGINES
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('root',type=pathlib.Path)
+parser.add_argument('--arch',choices=['amd64','arm64'],required=True)
+args=parser.parse_args();root=args.root.resolve()
+for name in ENGINES:
+    inspect(root/name,args.arch)
+    subprocess.run([str(root/name),'--version'],check=True,timeout=10)
+subprocess.run([str(root/'vmbench'),'doctor'],check=True,timeout=40)
+print('Static ELF and safe runtime checks passed on this host. Other targets remain unqualified.')

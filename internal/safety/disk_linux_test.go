@@ -89,20 +89,82 @@ func TestOwnFilesAndCleanup(t *testing.T) {
 	}
 }
 func TestPermissionAndSpaceFailuresBeforeWriting(t *testing.T) {
-	d := t.TempDir()
-	os.Chmod(d, 0500)
-	defer os.Chmod(d, 0700)
-	if _, err := Prepare(d, "readonly", 4096, 1); err == nil || !strings.Contains(err.Error(), "write permission") {
-		t.Fatal(err)
+	newDirectory := func(t *testing.T) string {
+		t.Helper()
+		d := t.TempDir()
+		// Run before TempDir's cleanup, including when an assertion calls Fatal.
+		t.Cleanup(func() {
+			if err := os.Chmod(d, 0700); err != nil {
+				t.Errorf("restore fixture permissions: %v", err)
+			}
+		})
+		if err := os.Chmod(d, 0700); err != nil {
+			t.Fatal(err)
+		}
+		return d
 	}
-	os.Chmod(d, 0700)
-	if _, err := Prepare(d, "space", 1<<50, 4); err == nil || !strings.Contains(err.Error(), "insufficient disk space") {
-		t.Fatal(err)
+	assertEmpty := func(t *testing.T, d string) {
+		t.Helper()
+		entries, err := os.ReadDir(d)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("rejection created files: entries=%v err=%v", entries, err)
+		}
 	}
-	entries, err := os.ReadDir(d)
-	if err != nil || len(entries) != 0 {
-		t.Fatal(entries, err)
+	for _, fixture := range []struct {
+		name string
+		mode os.FileMode
+	}{{"readonly", 0500}, {"no-search", 0400}, {"no-access", 0000}} {
+		t.Run(fixture.name, func(t *testing.T) {
+			d := newDirectory(t)
+			if err := os.Chmod(d, fixture.mode); err != nil {
+				t.Fatal(err)
+			}
+			if info, err := os.Stat(d); err != nil || info.Mode().Perm() != fixture.mode {
+				t.Fatalf("fixture mode was not applied: info=%v err=%v", info, err)
+			}
+			target, err := Prepare(d, "permission", 4096, 1)
+			// Restore access before inspecting contents or closing an unexpected target.
+			if restoreErr := os.Chmod(d, 0700); restoreErr != nil {
+				t.Fatal(restoreErr)
+			}
+			if target != nil {
+				if closeErr := target.Close(); closeErr != nil {
+					t.Errorf("close unexpected target: %v", closeErr)
+				}
+				t.Fatalf("permission-restricted target accepted: uid=%d err=%v", os.Geteuid(), err)
+			}
+			// Non-root normally fails openat/faccessat with EACCES. Root can bypass
+			// DAC, then hits the separate fail-closed check for absent write bits.
+			if !errors.Is(err, os.ErrPermission) && (os.Geteuid() != 0 || err == nil || !strings.Contains(err.Error(), "no write permission bits")) {
+				t.Fatalf("expected permission rejection: uid=%d mode=%04o err=%v", os.Geteuid(), fixture.mode, err)
+			}
+			assertEmpty(t, d)
+		})
 	}
+	t.Run("space", func(t *testing.T) {
+		d := newDirectory(t)
+		var fs syscall.Statfs_t
+		if err := syscall.Statfs(d, &fs); err != nil {
+			t.Fatal(err)
+		}
+		if fs.Bsize <= 0 || fs.Blocks > (^uint64(0)-metadataReserve)/uint64(fs.Bsize) {
+			t.Fatal("invalid fixture filesystem capacity")
+		}
+		// Reserving the entire filesystem guarantees insufficient headroom even
+		// if other processes free space. The requested file itself stays tiny.
+		reserve := max(ReserveBytes, fs.Blocks*uint64(fs.Bsize))
+		target, err := PrepareReserved(d, "space", 4096, 1, false, reserve)
+		if target != nil {
+			if closeErr := target.Close(); closeErr != nil {
+				t.Errorf("close unexpected target: %v", closeErr)
+			}
+			t.Fatal("accepted dataset without reserved headroom")
+		}
+		if err == nil || !strings.Contains(err.Error(), "insufficient disk space") {
+			t.Fatal(err)
+		}
+		assertEmpty(t, d)
+	})
 }
 func TestPreparationCancellationCleansOwnedFiles(t *testing.T) {
 	target := createTarget(t, 2)

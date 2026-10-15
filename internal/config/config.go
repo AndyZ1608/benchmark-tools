@@ -18,6 +18,7 @@ type Config struct {
 	Details, DiskSizeExplicit                                                                      bool
 
 	StabilityCV, StealWarningPercent float64
+	TCPBitrate                       string // Optional aggregate-controller pacing, used only by automatic TCP tests.
 }
 
 func Defaults(p string) (Config, error) {

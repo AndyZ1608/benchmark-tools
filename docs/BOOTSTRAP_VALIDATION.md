@@ -1,4 +1,6 @@
-# Bootstrap validation — 2026-10-13
+# Bootstrap validation â€” 2026-10-13
+
+Historical bootstrap snapshot. Current cross-distribution implementation/evidence: [COMPATIBILITY.md](COMPATIBILITY.md).
 
 Implemented in the existing repository; no benchmark algorithm, workload, disk safety or statistics code was changed.
 

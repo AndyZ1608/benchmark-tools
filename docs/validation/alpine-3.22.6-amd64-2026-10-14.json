@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "date": "2026-10-14",
+  "os_release": "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.22.6\nPRETTY_NAME=\"Alpine Linux v3.22\"\nHOME_URL=\"https://alpinelinux.org/\"\nBUG_REPORT_URL=\"https://gitlab.alpinelinux.org/alpine/aports/-/issues\"\n",
+  "architecture": "amd64",
+  "environment": "QEMU TCG isolated VM; 2 vCPU, 1536 MiB; private ext4 virtual disk; no host passthrough",
+  "kernel": "6.12.110-0-virt",
+  "phases": {
+    "go_test": {
+      "status": "passed",
+      "packages": 14,
+      "command": "go1.23.12 test ./..."
+    },
+    "go_vet": {
+      "status": "passed",
+      "command": "go1.23.12 vet ./..."
+    },
+    "bootstrap": {
+      "status": "passed",
+      "tests": 49
+    },
+    "platform": {
+      "status": "passed",
+      "tests": 13
+    },
+    "native_integrity": {
+      "status": "passed",
+      "tests": 1
+    },
+    "syntax": {
+      "status": "passed"
+    },
+    "shellcheck": {
+      "status": "passed"
+    },
+    "source_initialization": {
+      "status": "passed",
+      "toolchain": "project-local verified Go 1.23.12"
+    },
+    "actual_package_installation": {
+      "status": "passed",
+      "manager": "apk",
+      "package": "iperf3"
+    },
+    "repeated_initialization": {
+      "status": "passed",
+      "cli_built": 0,
+      "native_built": 0
+    },
+    "read_only_check": {
+      "status": "passed",
+      "state_byte_hashes_unchanged": true
+    },
+    "version_aliases_and_help": {
+      "status": "passed"
+    },
+    "static_release": {
+      "status": "passed",
+      "target": "linux-amd64-musl-static",
+      "review": "docs/RELEASE-AUDIT.md"
+    },
+    "offline_no_development_tools": {
+      "status": "passed",
+      "fresh_root": "Alpine 3.22.6 diskless ISO; no build-guest packages installed",
+      "cpu_model": "QEMU qemu64 baseline; no AES/AVX requirement",
+      "network": "eth0 DOWN throughout testing; no default route; only loopback enabled for iperf smoke",
+      "unavailable_tools": [
+        "go",
+        "gcc",
+        "cc",
+        "clang",
+        "git",
+        "python3",
+        "pip",
+        "docker"
+      ],
+      "modes": {
+        "quick": {
+          "exit_code": 0,
+          "cpu": "completed",
+          "memory": "completed",
+          "disk": "completed",
+          "network": "skipped-no-peer",
+          "owned_files_removed": true,
+          "unrelated_sentinel_preserved": true
+        },
+        "standard": {
+          "exit_code": 0,
+          "cpu": "completed",
+          "memory": "completed",
+          "disk": "completed",
+          "network": "skipped-no-peer",
+          "owned_files_removed": true,
+          "unrelated_sentinel_preserved": true
+        },
+        "max": {
+          "exit_code": 0,
+          "cpu": "completed",
+          "memory": "completed",
+          "disk": "completed",
+          "network": "skipped-no-peer",
+          "owned_files_removed": true,
+          "unrelated_sentinel_preserved": true
+        }
+      },
+      "ceilings": {
+        "workers": 1,
+        "ram": "64MiB ceiling; 48MiB planned allocation",
+        "disk_data": "16MiB",
+        "disk_jobs": 1,
+        "disk_depth": 2,
+        "outstanding_io": 2,
+        "sample_seconds": 1,
+        "max_duration_per_mode": "10m",
+        "max_cv": 0.5
+      },
+      "stress_ng": "one verified CPU worker, 1 second",
+      "iperf3": "client/server loopback, 1 second; not remote-network qualification"
+    }
+  },
+  "remote_network": "not-tested; loopback smoke is recorded separately",
+  "performance_certification": false,
+  "reviewed_binary_sha256": {
+    "vmbench": "2f3da3c0715cd82a0ab8d3b7cdcf3d0ceaab4b877ee732f28d3cf13ff362c6c5",
+    "engines/compute-bench": "65b4b9814e8da829342613cf24506e9bf7dfe08e596ca277cf30f7a11c083366",
+    "engines/fio": "6641bc7ccc5fe69e8e5b1769e79c2d583e73c3a556af5b1ee3a1385825e0c910",
+    "engines/stress-ng": "abb5b8345698fdd72cbb5664ee3f027d4297f47b8daec9db8fda6b8a28892794",
+    "engines/iperf3": "06b00e3f3280b2285e93e391e9c72cf678f5e8c32d5f1b64f0323fb2b360e434"
+  },
+  "notes": [
+    "QEMU TCG functional checks do not establish representative VM/host performance",
+    "First 16MiB RAM smoke limit correctly caused RAM to be skipped; final three modes used 64MiB and all CPU/MEMORY/DISK states completed",
+    "No remote peer, ARM64 execution, XFS/Btrfs or other distribution qualification",
+    "Final archive documentation refreshed after tests; all five tested binary hashes retained"
+  ]
+}

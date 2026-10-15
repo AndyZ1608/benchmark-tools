@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 	"vmbench/internal/config"
+	"vmbench/internal/platform"
 	"vmbench/internal/runner"
 )
 
@@ -38,9 +39,18 @@ func Run(ctx context.Context, c config.Config) (Result, error) {
 	if net.ParseIP(c.Target) == nil {
 		return Result{}, fmt.Errorf("--target must be a literal IP address")
 	}
+	help, err := runner.RunText(ctx, "iperf3", []string{"--help"}, 5*time.Second)
+	if err != nil {
+		return Result{}, fmt.Errorf("iperf3 capability check: %w", err)
+	}
+	if err = validateOptions(string(help), c); err != nil {
+		return Result{}, err
+	}
 	args := []string{"-J", "-c", c.Target, "-p", strconv.Itoa(c.Port), "-t", strconv.Itoa(c.Duration), "-O", strconv.Itoa(c.Warmup), "-P", strconv.Itoa(c.Streams)}
 	if c.UDP {
 		args = append(args, "-u", "-b", c.Bitrate, "-l", strconv.Itoa(c.Packet))
+	} else if c.TCPBitrate != "" {
+		args = append(args, "-b", c.TCPBitrate)
 	}
 	if c.Reverse {
 		args = append(args, "-R")
@@ -67,4 +77,23 @@ func ServerOutput(ctx context.Context, c config.Config, output io.Writer) error 
 	fmt.Fprintf(output, "Listening on %s:%d. Use trusted benchmark networks only.\n", c.Bind, c.Port)
 	_, e := runner.Run(ctx, "iperf3", []string{"-s", "-B", c.Bind, "-p", strconv.Itoa(c.Port)}, 24*time.Hour)
 	return e
+}
+
+func validateOptions(help string, c config.Config) error {
+	required := [][]string{{"--json", "-J"}, {"--parallel", "-P"}, {"--omit", "-O"}}
+	if c.Bidir {
+		required = append(required, []string{"--bidir"})
+	}
+	if c.Reverse {
+		required = append(required, []string{"--reverse", "-R"})
+	}
+	if c.TCPBitrate != "" || c.UDP {
+		required = append(required, []string{"--bitrate", "--bandwidth", "-b"})
+	}
+	for _, aliases := range required {
+		if !platform.HasOption(help, aliases...) {
+			return fmt.Errorf("installed iperf3 does not support requested option %s; supply a compatible version", aliases[0])
+		}
+	}
+	return nil
 }

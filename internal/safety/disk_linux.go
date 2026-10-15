@@ -106,6 +106,9 @@ func Prepare(path, id string, size int64, jobs int) (*Target, error) {
 	return PrepareSized(path, id, size, jobs, false)
 }
 func PrepareSized(path, id string, size int64, jobs int, automatic bool) (_ *Target, err error) {
+	return PrepareReserved(path, id, size, jobs, automatic, ReserveBytes)
+}
+func PrepareReserved(path, id string, size int64, jobs int, automatic bool, reserve uint64) (_ *Target, err error) {
 	absolute, fd, err := openDirectory(path)
 	if err != nil {
 		return nil, err
@@ -139,7 +142,7 @@ func PrepareSized(path, id string, size int64, jobs int, automatic bool) (_ *Tar
 	if fs.Bsize <= 0 || uint64(fs.Bavail) > ^uint64(0)/uint64(fs.Bsize) {
 		return nil, fmt.Errorf("invalid filesystem capacity for target %q", absolute)
 	}
-	t.Plan, err = PlanSpace(uint64(fs.Bavail)*uint64(fs.Bsize), size, jobs, automatic)
+	t.Plan, err = PlanSpaceReserved(uint64(fs.Bavail)*uint64(fs.Bsize), size, jobs, automatic, reserve)
 	if err != nil {
 		return nil, fmt.Errorf("target directory %q: %w", absolute, err)
 	}
@@ -469,8 +472,8 @@ func (t *Target) checkHeadroom(extra uint64) error {
 		return fmt.Errorf("invalid filesystem capacity in workspace %q", t.Dir)
 	}
 	free := uint64(fs.Bavail) * uint64(fs.Bsize)
-	if free < ReserveBytes+metadataReserve+extra {
-		return fmt.Errorf("free space dropped below required reserve in workspace %q: available %d bytes; reserved %d bytes", t.Dir, free, ReserveBytes)
+	if extra > ^uint64(0)-t.Plan.ReserveBytes-metadataReserve || free < t.Plan.ReserveBytes+metadataReserve+extra {
+		return fmt.Errorf("free space dropped below required reserve in workspace %q: available %d bytes; reserved %d bytes", t.Dir, free, t.Plan.ReserveBytes)
 	}
 	return nil
 }

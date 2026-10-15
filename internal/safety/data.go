@@ -24,7 +24,13 @@ type Plan struct {
 
 // PlanSpace includes all jobs and headroom, before any workspace or file is created.
 func PlanSpace(free uint64, size int64, jobs int, automatic bool) (Plan, error) {
-	p := Plan{AvailableBytes: free, ReserveBytes: ReserveBytes, Jobs: jobs}
+	return PlanSpaceReserved(free, size, jobs, automatic, ReserveBytes)
+}
+func PlanSpaceReserved(free uint64, size int64, jobs int, automatic bool, reserve uint64) (Plan, error) {
+	if reserve < ReserveBytes || reserve > math.MaxUint64-metadataReserve {
+		return Plan{}, fmt.Errorf("disk reserve must be at least 1GiB and fit capacity arithmetic")
+	}
+	p := Plan{AvailableBytes: free, ReserveBytes: reserve, Jobs: jobs}
 	if size <= 0 || jobs < 1 || jobs > 128 {
 		return p, fmt.Errorf("invalid disk dataset: size=%d jobs=%d", size, jobs)
 	}
@@ -32,20 +38,20 @@ func PlanSpace(free uint64, size int64, jobs int, automatic bool) (Plan, error) 
 	if n > math.MaxUint64/uint64(jobs) {
 		return p, fmt.Errorf("disk dataset size overflow")
 	}
-	if automatic && free > ReserveBytes+metadataReserve {
-		cap := (free - ReserveBytes - metadataReserve) / uint64(jobs)
+	if automatic && free > reserve+metadataReserve {
+		cap := (free - reserve - metadataReserve) / uint64(jobs)
 		cap = cap / (1 << 20) * (1 << 20)
 		if cap < n {
 			if cap < 16<<20 {
-				return p, fmt.Errorf("insufficient disk space for automatic sizing: available %d bytes; reserved %d bytes; minimum 16MiB per job", free, ReserveBytes)
+				return p, fmt.Errorf("insufficient disk space for automatic sizing: available %d bytes; reserved %d bytes; minimum 16MiB per job", free, reserve)
 			}
 			n = cap
 		}
 	}
 	p.FileBytes = n
 	p.TotalBytes = n * uint64(jobs)
-	if free < ReserveBytes+metadataReserve || p.TotalBytes > free-ReserveBytes-metadataReserve {
-		return p, fmt.Errorf("insufficient disk space: required %d bytes for %d jobs; available %d bytes; reserved free space %d bytes plus %d bytes metadata", p.TotalBytes, jobs, free, ReserveBytes, metadataReserve)
+	if free < reserve+metadataReserve || p.TotalBytes > free-reserve-metadataReserve {
+		return p, fmt.Errorf("insufficient disk space: required %d bytes for %d jobs; available %d bytes; reserved free space %d bytes plus %d bytes metadata", p.TotalBytes, jobs, free, reserve, metadataReserve)
 	}
 	return p, nil
 }

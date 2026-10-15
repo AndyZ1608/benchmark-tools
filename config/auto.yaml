@@ -1,0 +1,16 @@
+# Optional example: ./vmbench standard --config config/auto.yaml
+# Normal commands need no configuration file. Set only an existing safe target.
+# disk-path: /data
+# network-peer: 10.0.0.20
+max-workers: 32
+max-ram: 2GiB
+max-disk-data: 2GiB
+min-free-disk: 1GiB
+max-disk-depth: 64
+max-disk-jobs: 4
+max-outstanding-io: 128
+max-network-streams: 8
+network-bitrate: 1G
+max-duration: 30m
+include-writes: false
+# ack-max and confirm-writes must be supplied for each invocation, never saved.

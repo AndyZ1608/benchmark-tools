@@ -1,0 +1,87 @@
+name: Linux compatibility candidates
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  safety-nonroot:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        umask: ['0000', '0022', '0077']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.12'
+      - name: Exercise real filesystem permissions as the regular runner user
+        env:
+          TEST_UMASK: '${{ matrix.umask }}'
+          GOTOOLCHAIN: local
+        run: |
+          test "$(id -u)" -ne 0
+          export TEST_TELEMETRY_DIR="$PWD/scripts/go-telemetry"
+          export TMPDIR="$RUNNER_TEMP/vmbench-permission-tests"
+          mkdir -m 700 "$TMPDIR"
+          umask "$TEST_UMASK"
+          go test -v ./internal/safety -count=1
+          go test ./...
+  candidates:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: 'ubuntu:22.04', family: debian}
+          - {image: 'ubuntu:24.04', family: debian}
+          - {image: 'debian:12', family: debian}
+          - {image: 'debian:13', family: debian}
+          - {image: 'rockylinux:9', family: rhel}
+          - {image: 'rockylinux:10', family: rhel}
+          - {image: 'almalinux:9', family: rhel}
+          - {image: 'almalinux:10', family: rhel}
+          - {image: 'quay.io/centos/centos:stream9', family: rhel}
+          - {image: 'quay.io/centos/centos:stream10', family: rhel}
+          - {image: 'fedora:latest', family: rhel}
+          - {image: 'opensuse/leap:latest', family: suse}
+          - {image: 'opensuse/tumbleweed:latest', family: suse}
+          - {image: 'archlinux:base', family: arch}
+          - {image: 'alpine:3.22', family: alpine}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.12'
+      - name: Candidate source installation and bounded checks in disposable container
+        env:
+          IMAGE: '${{ matrix.image }}'
+          FAMILY: '${{ matrix.family }}'
+        run: |
+          mkdir -p compatibility-results
+          docker run --rm -e FAMILY -e PATH=/opt/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "$PWD:/work" -v "$(go env GOROOT):/opt/go:ro" -w /work "$IMAGE" sh -c '
+            set -e
+            case "$FAMILY" in
+              debian) apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash python3 coreutils findutils binutils gcc make ca-certificates;;
+              rhel) dnf install -y bash python3 coreutils findutils binutils gcc make ca-certificates;;
+              suse) zypper --non-interactive install --no-recommends bash python3 coreutils findutils binutils gcc make ca-certificates;;
+              arch) pacman -S --needed --noconfirm bash python coreutils findutils binutils gcc make ca-certificates;;
+              alpine) apk add --no-cache bash python3 coreutils findutils binutils build-base ca-certificates;;
+            esac
+            exec python3 scripts/compatibility-test.py --install --workloads --output compatibility-results/result.json
+            '
+      - name: Record setup failures too
+        if: always()
+        env:
+          IMAGE: '${{ matrix.image }}'
+        run: |
+          if [ ! -f compatibility-results/result.json ]; then
+            mkdir -p compatibility-results
+            python3 -c 'import json,os,pathlib; pathlib.Path("compatibility-results/result.json").write_text(json.dumps({"schema":1,"image":os.environ["IMAGE"],"environment":"container","host_vm_certification":False,"phases":{"setup":{"status":"failed"},"installation":{"status":"not-run"},"offline_release":{"status":"not-run"}}},indent=2))'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 'compatibility-${{ strategy.job-index }}'
+          path: compatibility-results/
+          if-no-files-found: warn

@@ -42,7 +42,7 @@ func fakeFio() {
 		}
 		return ""
 	}
-	if get("allow_file_create") != "0" || get("unlink") != "0" || get("fallocate") != "none" || get("time_based") != "1" {
+	if get("thread") != "1" || get("allow_file_create") != "0" || get("unlink") != "0" || get("fallocate") != "none" || get("time_based") != "1" {
 		fmt.Fprintln(os.Stderr, "unsafe or untimed fio fixture invocation")
 		os.Exit(91)
 	}
@@ -112,9 +112,9 @@ func fakeFio() {
 	}
 	runTime, _ := strconv.ParseFloat(get("runtime"), 64)
 	value := Direction{IOPS: 100, BWBytes: 409600, Runtime: runTime * 1000, Completion: Latency{Mean: 10000, Percentile: map[string]float64{"99.000000": 20000}}}
-	result := Result{}
+	result := Result{Options: map[string]string{"ioengine": get("ioengine")}}
 	for range names {
-		job := Job{}
+		job := Job{Depth: map[string]float64{get("iodepth"): 100}}
 		switch get("rw") {
 		case "randrw":
 			job.Read, job.Write = value, value

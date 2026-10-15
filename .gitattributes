@@ -1,2 +1,11 @@
 *.sh text eol=lf
 *.py text eol=lf
+
+go.mod text eol=lf
+go.sum text eol=lf
+VERSION text eol=lf
+*.lock text eol=lf
+scripts/go-telemetry/mode text eol=lf
+
+# Downloaded runtime material is checksum-pinned byte for byte.
+third-party/runtime/** -text

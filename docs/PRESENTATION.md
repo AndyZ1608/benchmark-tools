@@ -1,5 +1,7 @@
 # Benchmark output
 
+Automatic `quick`, `standard` and `max` commands use a compact four-module summary with selected configurations, confirmation medians/CV, separate latency ranges, searched bounds and resource ceilings. Missing peers/targets are SKIPPED; invalid results and cleanup failures remain visible. `--details` adds the in-memory search trials and detected metadata. MAX labels mean maximum observed within the bounded search, not an absolute hardware maximum. See [automatic modes](AUTOMATIC.md).
+
 VMBench displays an English-only terminal summary. Titles, labels, prompts, progress and help use ASCII. Results remain in memory during execution. There is no report export, automatic `results/` directory or report-saving API. Existing historical files are never removed. `system info` displays a compact metadata table instead of JSON.
 
 ## Options

@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "date": "2026-10-14",
+  "meaning": "Adapters are implemented; untested targets are not certified. Container checks are not full host/VM qualification.",
+  "targets": [
+    {
+      "distribution": "Ubuntu",
+      "versions": [
+        "22.04",
+        "24.04"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "apt-get",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "Debian",
+      "versions": [
+        "12",
+        "13"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "apt-get",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "Rocky Linux",
+      "versions": [
+        "9",
+        "10"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "dnf",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "AlmaLinux",
+      "versions": [
+        "9",
+        "10"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "dnf",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "RHEL",
+      "versions": [
+        "9",
+        "10"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "dnf",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "CentOS Stream",
+      "versions": [
+        "9",
+        "10"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "dnf",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "Fedora",
+      "versions": [
+        "image-selected"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "dnf",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "openSUSE Leap",
+      "versions": [
+        "image-selected"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "zypper",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "openSUSE Tumbleweed",
+      "versions": [
+        "rolling"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "zypper",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "SLES",
+      "versions": [
+        "repository-dependent"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "zypper",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "Arch Linux",
+      "versions": [
+        "rolling"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "pacman",
+      "adapter": "fixture-tested",
+      "installation": "not-verified",
+      "engine_runtime": "not-verified",
+      "bounded_workloads": "not-verified",
+      "offline_deployment": "not-verified",
+      "redistribution_audit": "not-approved"
+    },
+    {
+      "distribution": "Alpine Linux",
+      "versions": [
+        "3.22.6"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64-experimental"
+      ],
+      "package_manager": "apk",
+      "adapter": "fixture-tested",
+      "installation": "verified-amd64-source-and-real-apk-install",
+      "engine_runtime": "verified-amd64-system-and-pinned-static",
+      "bounded_workloads": "verified-quick-standard-max-on-isolated-ext4",
+      "offline_deployment": "verified-fresh-amd64-vm-network-down-no-development-packages",
+      "redistribution_audit": "recorded-build-source-notice-link-map-review",
+      "evidence": "validation/alpine-3.22.6-amd64-2026-10-14.json"
+    }
+  ],
+  "development_checks": {
+    "go": "1.23.12 test ./... and vet passed on Windows and Alpine Linux; 14 test-bearing packages",
+    "bootstrap": "49 tests passed on Alpine",
+    "platform": "13 tests passed on Windows and Alpine",
+    "native": "optimized cycle/corruption correctness test passed on Alpine",
+    "shell": "syntax and ShellCheck passed on Alpine",
+    "arm64": "Go CLI and native C cross-build passed; execution NOT verified",
+    "ci": "representative distro-container workflow implemented, not run in this session",
+    "skipped_workload_gate": "CI rejects a zero-exit run with skipped CPU/MEMORY/DISK; direct positive/negative check passed"
+  }
+}

@@ -1,88 +1,228 @@
 # VMBench
-An offline-first Linux CLI implementation under development. **This is not a qualified v1.0 offline release.**
 
-## Quick Start
+Portable Linux VM Performance Benchmark CLI
 
-Supported source-install targets: **Ubuntu 22.04 or 24.04, x86_64**.
+VMBench measures CPU, memory, disk and network performance with three commands:
+
+```bash
+./vmbench quick
+./vmbench standard
+./vmbench max
+```
+
+Benchmark execution is offline: it uses local engines and optional trusted network peers. Source initialization can install missing dependencies with approval. A complete binary bundle needs neither a compiler nor Go. Current distribution qualification and release limitations are stated below; recognition by the installer does not certify a platform.
+
+## Features
+
+- Automatic effective CPU, affinity/quota, available memory, cache and network detection.
+- QUICK screening, repeated STANDARD measurements, and bounded adaptive MAX discovery.
+- Integer/floating-point throughput, concurrency scaling, STREAM-style RAM bandwidth and pointer-chase latency.
+- fio direct asynchronous I/O, random IOPS, sequential throughput and latency, with owned temporary datasets.
+- iperf3 TCP throughput with remote peers and controlled parallel streams; advanced UDP testing remains available.
+- English, ASCII terminal summaries and optional details. No mandatory result files, database, GUI, or daemon.
+- Distribution-aware source initialization, incremental startup, read-only diagnostics and explicit offline operation.
+- Architecture/libc-specific static release tooling, checksums, engine provenance and a redistribution audit gate.
+
+## Operating systems and qualification
+
+The installation adapters below are implemented. The CI workflow attempts representative container installations; **adding a workflow does not mean those jobs have run**. Container results also do not qualify a full VM. See [compatibility evidence](docs/COMPATIBILITY.md) and [machine-readable status](docs/compatibility.json).
+
+| Distribution | Version | Architecture | Installation status | Runtime validation status | Offline release status | Notes |
+|---|---|---|---|---|---|---|
+| Ubuntu | 22.04, 24.04 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | apt |
+| Debian | 12, 13 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | apt |
+| Rocky Linux, AlmaLinux | 9, 10 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | dnf; enabled repositories only |
+| RHEL, CentOS Stream | 9, 10 | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | RHEL requires valid repository access |
+| Fedora | Image-selected release | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | No lifecycle/support assertion for arbitrary releases |
+| openSUSE Leap/Tumbleweed, SLES | Image-selected/installed version | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | zypper; SLES repository access required |
+| Arch Linux | Rolling | amd64 / arm64 | Adapter tested with fixtures; real installation unverified | Unverified | Unverified | Existing synchronized package metadata; no automatic OS upgrade |
+| Alpine Linux | 3.22.6 | amd64 | Source initialization, real apk install and unchanged reuse verified | System/static engines; bounded QUICK/STANDARD/MAX CPU/RAM/Disk passed | Static bundle passed in fresh VM without network or development packages | QEMU functional tests; ext4 only; [evidence](docs/COMPATIBILITY.md) |
+
+ARM64 is experimental: portable C and Go targets are implemented; native ARM64 execution is not verified. Unknown IDs and derivatives are rejected for automatic installation even if `ID_LIKE` names a known family. Windows is a development/test host only, not a benchmark target.
+
+## Quick start
 
 ```bash
 git clone https://github.com/AndyZ1608/benchmark-tools.git
 cd benchmark-tools
-chmod +x init.sh start.sh
 ./start.sh
 ```
 
-The first launch initializes the project, then opens the existing CLI. By default this is an **online development installation**: missing GCC/build-essential and fio/stress-ng/iperf3 packages are listed before apt installation, and require an interactive confirmation. The installer never performs a system upgrade. Use `./start.sh --yes` to explicitly authorize noninteractive installation of the listed missing packages. No benchmarks or background servers are started during initialization.
+Use `bash start.sh` if execute bits were lost. Source installation requires Bash and standard Linux shell utilities. First launch detects the host, obtains missing dependencies after approval, selects a compatible Go toolchain, builds the CLI/native engine, checks engines, runs Go tests when building the CLI, and commits installation state after validation. Initialization does not run stress benchmarks.
 
-If necessary, initialization downloads checksum-pinned Go 1.23.12 into `.vmbench/toolchains/`; it never overwrites system Go or changes `go env -w` settings. Compatible newer installations are reused. All build/test invocations use the selected local toolchain with automatic Go switching disabled.
+Later launches reuse unchanged components. In a source checkout, use `./start.sh quick` after `git pull` to rebuild changed code. Direct `./vmbench` runs the existing executable independently and cannot rebuild itself.
 
-Subsequent launches verify source/binary hashes, engine identities, shared libraries and version commands, then launch without rebuilding, downloading or installing packages. CLI source changes rebuild the CLI; native source changes rebuild only the native kernel. `./init.sh` reruns validation and reuses unchanged components.
+## Benchmark commands
 
-```bash
-./start.sh cpu test --preset quick
-./start.sh cpu stress --workers 8 --duration 300
-./start.sh ram test --threads 2 --size 1GiB
-./start.sh disk test --path /data --profile randread-4k
-./start.sh system info
-./vmbench cpu test --preset quick
-
-./init.sh --offline                 # local tools and files only
-./start.sh --offline --help         # startup options precede CLI arguments
-./start.sh --offline --reinit --help # force source builds where source exists
-./init.sh --yes                     # authorize missing apt packages
-```
-
-`--reinit` forces source rebuilding; prebuilt-only releases are revalidated. `--offline`, `--yes`, `--engine-mode system|bundled`, and `--reinit` are startup options consumed only before the first CLI argument. Use `--` to end that prefix. All remaining arguments are forwarded exactly using `exec`; application exit codes and signals are preserved. Scripts resolve the repository from their own location and also work from other directories or paths containing spaces. Relative benchmark paths retain the caller's working-directory meaning.
-
-Offline mode never uses apt, Git network operations, remote source fetching, package registries, or automatic Go toolchain downloads. A complete prebuilt release needs no Go, GCC, Python or binutils to initialize: only the standard Ubuntu runtime/base utilities and its verified engines. An offline source build needs a compatible local Go and GCC. Missing dependencies produce an error and leave no successful new state.
-
-Default engine mode is `system`: existing compatible local engines or installed system engines are copied beside the CLI and their runtime dependencies checked using `ldd`. **These host-linked binaries are not automatically portable.** `./init.sh --engine-mode bundled` reuses `vendor-engines/` or calls the existing pinned source-fetch/build scripts and requires static executables. It needs the Linux build dependencies documented in [docs/BUILD.md](docs/BUILD.md); offline bundled source builds require cached archives. Static validation alone does not qualify an Ubuntu standalone release.
-
-Installation state is stored in `.vmbench/install-state.json` with checksummed binary/source manifests, engine versions, linkage and toolchain metadata. State is written only after all checks pass; it is never executed as shell code. Failures and SIGINT/SIGTERM clean up this attempt's staging directory. A stale `.vmbench/init.lock` after an uncatchable interruption must be removed only after confirming no initializer is active. `--reinit` provides explicit rebuilding for restored binaries whose source provenance is unknown.
-
-See [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) for toolchain diagnostics, troubleshooting and validation details. The bootstrap does not change the existing benchmark methods or remedy the benchmark qualification limitations below.
-
-## Use
-Build the CLI: `go build ./cmd/vmbench`. Linux native kernel: `cc -O2 -fno-fast-math -pthread native/compute-bench.c -o engines/compute-bench` beside the CLI. Supply fio, stress-ng and iperf3 under the same engines directory; runtime never downloads anything.
-
-```
-./vmbench --help
-./vmbench system info
-./vmbench cpu test --preset quick
-./vmbench cpu stress --workers 8 --duration 300
-./vmbench ram test --threads 8 --size 4GiB
-./vmbench disk test --path /data --profile randread-4k --iodepth 32 --numjobs 4 --size 2GiB
-./vmbench network server --bind 127.0.0.1
-./vmbench network test --target 127.0.0.1
-./vmbench full test --preset precision --path /data --non-interactive
-```
-
-Benchmark results use a compact English summary with ASCII layouts. `--details` adds human-readable workload statistics and recorded telemetry. Progress and errors go to stderr. Results stay in memory; the CLI does not print raw JSON, save benchmark reports or create `results/`. Existing historical reports are left untouched. `system info` also uses a text table. See [output rules](docs/PRESENTATION.md) and [illustrative summaries](docs/RESULT_EXAMPLES.md).
+| Mode | Purpose | Behavior |
+|---|---|---|
+| QUICK | Preliminary check | Short samples with resource detection; limited statistical confidence |
+| STANDARD | Repeated evaluation | Warm-up, repetitions, dispersion and consistency checks |
+| MAX | Highest validated observed performance within limits | Searches CPU/RAM concurrency, disk depth/jobs and optional network streams; confirms promising configurations |
 
 ```bash
-./vmbench cpu test --preset quick
-./vmbench ram test --details
-./vmbench disk test --path /data
-./vmbench full test --path /data --stability-cv 5 --steal-warning-percent 1
+./start.sh quick
+./vmbench standard --disk-path /data
+./vmbench max --disk-path /data --network-peer 10.0.0.20
+# For unattended MAX, acknowledge this invocation explicitly:
+./vmbench max --non-interactive --ack-max --disk-path /data
 ```
 
-The old language, JSON and output-directory options have been removed. Remove those fields from older YAML configurations. The default configuration already uses the supported options.
+The directory must already exist. Without a selected directory Disk is skipped (interactive runs may prompt). Without a peer Network is skipped. Interactive MAX requires acknowledgment; `init.sh --yes` cannot grant benchmark permission. Optional disk write measurements need both `--include-writes --confirm-writes`. Read measurements still prepare real data by writing private files.
 
-No arguments opens a command prompt. Bare component commands prompt for worker count, duration, warmup and repetitions. Enter accepts defaults. Flags enable noninteractive use. `--config config/default.yaml` accepts a deliberately restricted flat YAML scalar mapping; nested YAML is rejected. Precedence: CLI > file > preset > defaults. Seconds are integers; sizes support bytes, KiB, MiB, GiB.
+MAX reports **Maximum Observed Performance**, not the physical maximum of the VM or host. Resource/time ceilings can truncate a search; unconfirmed results are labeled honestly.
 
-Quick: 1s warmup, 2s per workload, one repetition. Standard: 2s warmup, 10s per workload, three repetitions. Precision: 5s warmup, 30s per workload, five repetitions. CPU and RAM run separately with one and requested worker counts. RAM total dataset is divided into three arrays and partitioned between workers. Each CPU unit means one defined recurrence iteration, not a universal operation or score. Floating-point contraction/compiler/platform changes may affect comparability.
+## Installation
 
-RAM Copy/Scale/Add/Triad are independently implemented STREAM-style operations, not official STREAM results. Working sets are configurable; verify they exceed aggregate LLC before interpreting as memory bandwidth. Pointer chasing uses a deterministic shuffled single cycle per worker; reports dependent access time including loop overhead. Native CPU correctness and timing need further qualification. Memory integrity writes and reads deterministic values; completion does not prove hardware reliability.
+```bash
+bash init.sh                 # approved missing dependencies, then build/check
+bash init.sh --yes           # noninteractive authorization for listed packages only
+bash init.sh --offline       # local dependencies only; no downloads/package-manager calls
+bash init.sh --check         # read-only compatibility and existing dependency checks
+bash init.sh --rebuild       # rebuild CLI/native, reuse usable installed dependencies
+bash init.sh --verbose       # show build/test diagnostics
+bash start.sh --offline quick
+```
 
-Disk tests validate an existing writable directory, create a private `.vmbench-<random-id>/` workspace, and write/verify seeded pseudo-random data across every job file before fio starts. **Read tests also generate preparation writes.** `--size` is per job for `disk test`; four jobs at `--size 2GiB` require 8GiB plus at least 1GiB free-space reserve and metadata headroom. `--file-size` remains an alias for disk tests; full tests use it for disk size while `--size` keeps its RAM meaning. Unspecified disk size defaults to a maximum of 1GiB per job and may shrink safely to available capacity; explicit sizes never shrink silently. Write/mixed profiles require `--confirm-writes`.
+Engine resolution prefers a verified `vendor-engines/` bundle, then the installed `engines/` copy, then a compatible system executable. Versions, linkage and origin are recorded in `.vmbench/install-state.json`; rebuild output identifies selected engines. No extra repositories, subscription services, signature bypass, OS upgrades or reboots are requested. Packages unavailable from enabled repositories cause an actionable failure.
 
-fio receives inherited handles to the exact prepared regular files. Direct I/O, engines, profiles, queue depths, job count, runtime, warmup, repetitions and internal JSON+ parsing remain intact. Temporary files are removed by tracked identity and directory handles after fio exits, including recoverable errors and cancellation. Cleanup refusals are visible and preserve the original error. SIGKILL, VM shutdown and host failure can leave workspace ownership metadata; old workspaces are never automatically removed. Direct I/O does not bypass all backend caches, and written pseudo-random data cannot guarantee physical allocation or defeat every compression/deduplication layer. See [disk lifecycle and safety](docs/DISK.md).
+Go is selected locally using `go.mod` and `GOTOOLCHAIN`. The pinned fallback is Go 1.23.12, downloaded only in online mode with an architecture-specific checksum from the official Go download index. System Go and shell profiles are not overwritten. Explicit incompatible selections fail rather than being silently overridden. Build scripts use the same selector. See [installation](docs/INSTALLATION.md).
 
-Network defaults to loopback server bind; explicitly select an interface for peers. Use trusted networks. iperf3 throughput is not forwarding PPS. Its raw end/interval data preserves UDP jitter/loss and TCP metrics. Missing peer skips network. No independent RTT probe is implemented.
+Manual source development, with an already compatible toolchain and dependencies:
 
-Default warnings cover actionable failures, invalid results, data safety and material measurement limitations. General caveats are confined to details. CPU steal warnings use a configurable screening threshold (`--steal-warning-percent`, default 1%); small measurements remain visible without implying a performance problem. Human output supports `NO_COLOR`, redirected output and `TERM=dumb`; optional green status means successful execution only. No sysctl/governor/cache tuning occurs.
+```bash
+GOTOOLCHAIN=local go test ./...
+GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath -ldflags "-X vmbench/internal/version.Value=$(cat VERSION)" -o vmbench ./cmd/vmbench
+mkdir -p engines
+cc -O2 -fno-fast-math -ffp-contract=off -pthread native/compute-bench.c -lm -o engines/compute-bench
+```
 
-## Validation and limitations
-Run `go test ./...`. Release: `bash scripts/build.sh`; see docs/BUILD.md for incomplete third-party build prerequisites. The Go CLI and native kernel were cross-compiled for Linux; Go unit tests and Windows help/version were executed on this Windows host. Native CPU/RAM kernels, real stress-ng/iperf3 runs and Ubuntu offline compatibility remain unexecuted. All Go package tests and real fio 3.39 read/write/mixed and cancellation smoke tests passed in an isolated Alpine Linux guest on disposable ext4 storage; these are functional checks, not representative hardware measurements. See [executed disk validation](docs/DISK_VALIDATION.md). Missing engines fail explicitly.
+Supply verified fio, stress-ng and iperf3 there, or use initialization for complete setup. The manual native command targets its build host; portable release builds apply explicit baseline ISA flags.
 
-Still incomplete: detailed live telemetry sampling, cgroup v1 support, ancestor memory-usage accounting, thermal readings and detailed NUMA policy, block-device metadata, percentage progress, native trusted reference fixtures, user-adjustable disk block sizes/headroom/data patterns, steady-state and time-series checks, independent network RTT measurement, qualified Linux third-party engine builds and complete transitive license audit. Summary assessments describe recorded observations and do not qualify hardware or rank speed. Do not use current output as acceptance evidence for infrastructure.
+## Offline deployment
+
+A source snapshot is not a complete offline binary release. On a matching Linux build VM with dependencies and cached pinned sources:
+
+```bash
+python3 scripts/fetch-engines.py           # online acquisition on the build machine only
+bash scripts/build-engines.sh             # verified cached sources; no downloads
+bash scripts/build.sh --candidate         # local qualification archive, not redistribution-ready
+# After a real license/transitive-dependency audit:
+bash scripts/build.sh --audit /path/to/approved-audit.json
+```
+
+Targets are `linux-amd64-musl-static`, `linux-amd64-glibc-static` and corresponding experimental arm64 targets. Build on the selected architecture/libc; arbitrary cross binaries are not advertised as verified. No single universal archive is claimed. All ELF executables must be static, match the target architecture, and pass safe invocation checks. A normal release also needs a matching source/license review record; see [offline packaging](docs/OFFLINE.md) and the [recorded Alpine review](docs/RELEASE-AUDIT.md).
+
+The recorded Alpine amd64 static build passed the complete offline test. Transfer its archive/checksum to a matching offline VM:
+
+```bash
+sha256sum -c vmbench-linux-amd64-musl-static.tar.gz.sha256
+tar -xzf vmbench-linux-amd64-musl-static.tar.gz
+cd vmbench
+./vmbench doctor
+./vmbench quick
+```
+
+No Go, GCC, git, Python, package manager, or network is needed for those binary commands. `doctor` uses the Go ELF reader and safe engine version/capability queries. It does not run workloads. Filesystem/direct-I/O behavior still needs target testing. Current complete-release qualification is listed in the compatibility table; do not interpret packaging success as distribution certification.
+
+## Benchmark methodology
+
+CPU tests count defined xorshift64 integer iterations and floating-point multiply/add iterations, with integrity checks and worker scaling. Results are workload-specific; stress-ng bogo operations are not a universal CPU score.
+
+RAM tests use STREAM-style copy/scale/add/triad bandwidth and shuffled dependent pointer chasing. Dataset size, cache size, thread count, memory pressure and NUMA placement affect interpretation. The latency path uses observable dependent loads so optimization cannot delete the loop.
+
+Disk uses fio JSON+ internally, direct asynchronous io_uring or libaio, private per-job datasets, controlled depth and jobs, and random 4K/sequential 1MiB profiles. It reports IOPS, throughput, average and P99 latency where available. MAX searches the configured parameter space and checks achieved depth/engine evidence. Automatic modes report io_uring setup restrictions and can use compiled libaio; they never substitute synchronous I/O. Advanced explicit engine requests fail if unsupported.
+
+Network uses iperf3, a literal trusted peer IP and controlled TCP streams. Optional options are checked against installed iperf3 help before the workload. A peer is required to measure a path; initialization never starts a network server. Use matching peer features and trusted networks. See [methodology](docs/BENCHMARK-METHODOLOGY.md) and [automatic modes](docs/AUTOMATIC.md).
+
+## Disk safety
+
+Test files are generated automatically inside private owned workspaces. Read tests can write during preparation. VMBench fills, synchronizes and verifies real data before measurement, passes owned descriptors to fio, stops children before cleanup, and removes only verified owned files. It does not format devices, change partitions or overwrite raw block devices.
+
+Abrupt machine/process termination can leave owned data and recovery metadata; unrelated and historical workspaces are never removed automatically. Preserve unexpected data for inspection. Permission changes, free-space/quota errors, unsupported direct I/O, and failed identity checks stop safely. Avoid critical production storage during peak activity. ext4 has disposable-VM evidence; XFS/Btrfs remain unqualified. See [disk safety](docs/DISK.md).
+
+## Example results
+
+The following are **illustrative status excerpts**, not recorded measurements or complete console transcripts. No performance numbers are invented.
+
+```text
+QUICK
+CPU - Completed
+RAM - Completed
+DISK - SKIPPED (no directory selected)
+NETWORK - SKIPPED (no remote peer)
+
+STANDARD
+CPU/RAM: repeated samples; summary includes dispersion
+Disk: dataset preparation, measurement and verified cleanup
+
+MAX
+Maximum Observed IOPS (Random Read 4K)
+Best confirmed configuration and observed range
+Unconfirmed configurations remain labeled unconfirmed
+```
+
+## CLI reference
+
+`./vmbench --help`, `./vmbench --version`, `./vmbench -v`, `./vmbench version`, `./vmbench doctor`, and `./vmbench MODE --help` are safe queries. Running without arguments opens the mode menu.
+
+Automatic flags:
+
+| Purpose | Flags |
+|---|---|
+| Targets/config | `--disk-path`, `--network-peer`, `--config`, `--details`, `--non-interactive` |
+| Authorization | `--ack-max`, `--include-writes`, `--confirm-writes` |
+| CPU/RAM | `--max-workers`, `--max-ram` |
+| Disk | `--max-disk-data`, `--min-free-disk`, `--max-disk-depth`, `--max-disk-jobs`, `--max-outstanding-io` |
+| Network | `--max-network-streams`, `--network-bitrate` |
+| Search/time | `--max-duration`, `--sample-seconds`, `--max-cv`, `--saturation-improvement` |
+
+Automatic YAML is flat; an explicit `--config` or caller `.vmbench/auto.yaml` is optional. `config/auto.yaml` is an example. Acknowledgments must be supplied per invocation.
+
+Advanced commands remain: `cpu test`, `cpu stress`, `ram test`, `ram stress`, `disk test`, `network server`, `network test`, `full test`, `system info`. Advanced presets are `quick|standard|precision`; `max` belongs to the automatic interface.
+
+Advanced flags include `--preset`, `--config`, `--workers`/`--threads`, `--duration`, `--warmup`, `--repetitions`, `--size`, `--method`, `--path`, `--file-size`, `--data-seed`, `--profile`, `--ioengine io_uring|libaio`, `--iodepth`, `--numjobs`, `--direct`, `--precondition`, `--confirm-writes`, `--target`, `--bind`, `--port`, `--streams`, `--udp`, `--bitrate`, `--packet`, `--window`, `--reverse`, `--bidir`, `--load`, `--sample`, `--non-interactive`, `--details`, `--stability-cv`, and `--steal-warning-percent`. Relevant flags depend on the component. Advanced stability CV uses percent; automatic `--max-cv` uses a fraction. [Presentation details](docs/PRESENTATION.md).
+
+## Troubleshooting
+
+| Failure | Action |
+|---|---|
+| Unsupported distribution/architecture | Check `/etc/os-release`, `uname -m` and compatibility evidence; do not force another family's packages |
+| Package manager/package missing | Ask an administrator about enabled repositories or supply verified engines; no extra repositories are enabled automatically |
+| Go mismatch/download blocked | Put compatible Go on PATH or in the project-local toolchain directory; check explicit `GOTOOLCHAIN`; offline cannot download |
+| Native build failure | Check C compiler/libc headers and `.vmbench/last-build.log`; use `--verbose` |
+| Missing fio/iperf3 | Rerun initialization or supply compatible engines beside the CLI; `doctor` checks identity/options |
+| Missing loader/shared library | Use an engine built for the actual architecture/libc; inspect `ldd`/`readelf` and the named path |
+| Permission denied | Check execute bits, mount `noexec`, target ownership and container restrictions |
+| io_uring denied | Automatic modes require available libaio instead; advanced users explicitly select `--ioengine libaio`; no synchronous fallback |
+| Directory missing/space insufficient | Create/select an existing disposable directory with reserve space and quota headroom |
+| Peer unreachable | Start the trusted peer's iperf3 server, check literal IP, port/firewall and supported features |
+| Old binary after git pull | Use `bash start.sh quick`; direct binaries do not rebuild themselves |
+
+See [diagnostics](docs/TROUBLESHOOTING.md) for details.
+
+## Development
+
+`cmd/vmbench` contains the CLI; `internal/benchmark` controllers and parsers; `internal/safety` disk ownership/lifecycle; `internal/system` resource detection; `internal/platform` ELF/runtime diagnostics; `native` the C kernel; `scripts/install` platform/package adapters; `tests` integration fixtures; `config` examples; `docs` methodology/evidence.
+
+```bash
+GOTOOLCHAIN=local go test ./...
+GOTOOLCHAIN=local go vet ./...
+python3 tests/test_bootstrap.py
+python3 tests/test_platform.py
+python3 tests/test_native.py
+bash -n init.sh
+bash -n start.sh
+# On a disposable Linux build/test environment with local dependencies:
+python3 scripts/compatibility-test.py --workloads --output compatibility-result.json
+```
+
+Use `--install` with that qualification script only in a disposable environment where package installation is authorized. CI uses separate distro containers and records phase results. RHEL/SLES need separately authorized repository environments. [Build details](docs/BUILD.md). Contributions should preserve measurement definitions and owned-file cleanup, include relevant tests, and report environment and qualification level. Do not label unrun targets verified.
+
+## Limitations
+
+VM scheduling, hypervisor overcommit, CPU steal, caches, storage contention, filesystem behavior, kernel features and peer capacity affect measurements. Container restrictions can prevent otherwise available kernel APIs. Repeated results and transparent working-set/configuration details matter more than universal hardware ratings. MAX is a bounded search, not a theoretical maximum. Distro adapters, static compilation, safe version execution, actual workloads and fully offline deployment are distinct validation levels. Platform qualification is incomplete, particularly ARM64, XFS/Btrfs, RHEL/SLES and cross-distro release redistribution.
+
+## License
+
+The project's [LICENSE](LICENSE) grants permissive use/copy/modify/distribute rights with its notice retained; the actual text is authoritative. Third-party engines retain their own licenses: [fio](LICENSES/fio/COPYING), [stress-ng](LICENSES/stress-ng/COPYING), [iperf3](LICENSES/iperf3/LICENSE). Static libc, libaio, compiler-runtime and optional dependency obligations also apply. Pinned engine sources/notices accompany staged bundles; a completed transitive audit is required before producing a normal distributable release.

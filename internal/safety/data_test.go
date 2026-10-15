@@ -30,6 +30,18 @@ func TestDatasetPlanAndReserve(t *testing.T) {
 		t.Fatal(p, err)
 	}
 }
+func TestStrongerConfiguredReserveCannotBeConsumed(t *testing.T) {
+	if _, err := PlanSpaceReserved(4<<30, 2<<30, 1, false, 3<<30); err == nil {
+		t.Fatal("configured reserve was ignored")
+	}
+	if _, err := PlanSpaceReserved(10<<30, 4096, 1, false, ReserveBytes-1); err == nil {
+		t.Fatal("reserve below 1GiB accepted")
+	}
+	p, err := PlanSpaceReserved(8<<30, 2<<30, 2, false, 3<<30)
+	if err != nil || p.ReserveBytes != 3<<30 || p.TotalBytes != 4<<30 {
+		t.Fatal(p, err)
+	}
+}
 
 type partialWriter struct {
 	bytes.Buffer

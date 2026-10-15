@@ -20,13 +20,15 @@ type Direction struct {
 	Total      Latency `json:"lat_ns"`
 }
 type Job struct {
-	Error int                `json:"error"`
-	Read  Direction          `json:"read"`
-	Write Direction          `json:"write"`
-	Depth map[string]float64 `json:"iodepth_level"`
+	Options map[string]string  `json:"job options"`
+	Error   int                `json:"error"`
+	Read    Direction          `json:"read"`
+	Write   Direction          `json:"write"`
+	Depth   map[string]float64 `json:"iodepth_level"`
 }
 type Result struct {
-	Jobs []Job `json:"jobs"`
+	Options map[string]string `json:"global options"`
+	Jobs    []Job             `json:"jobs"`
 }
 
 func Parse(b []byte) (Result, error) {

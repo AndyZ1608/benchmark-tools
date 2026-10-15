@@ -104,7 +104,7 @@ func RunManaged(ctx context.Context, c config.Config, _ string) (out Outcome, er
 	if err != nil {
 		return out, err
 	}
-	rw, bs, depths := profile(c)
+	_, bs, _ := profile(c)
 	block := int64(4096)
 	if bs == "1m" {
 		block = 1 << 20
@@ -147,7 +147,26 @@ func RunManaged(ctx context.Context, c config.Config, _ string) (out Outcome, er
 	}
 	out.Lifecycle.Prepared = true
 	runner.Notice(ctx, "prepared", fmt.Sprintf("[OK] Test data prepared in %.2f seconds; excluded from fio measurements", out.Lifecycle.PreparationSeconds))
-	base := []string{"--output-format=json+", "--eta=never", "--ioengine=" + c.Engine, "--direct=" + strconv.Itoa(boolInt(c.Direct)), "--size=" + strconv.FormatUint(target.Plan.FileBytes, 10), "--refill_buffers=1", "--scramble_buffers=1", "--randrepeat=1", "--group_reporting=0", "--allow_file_create=0", "--unlink=0", "--unlink_each_loop=0", "--fallocate=none", "--invalidate=1", "--buffer_compress_percentage=0", "--dedupe_percentage=0"}
+	measurement, e := measurePrepared(ctx, c, target)
+	out.Results, out.Raw = measurement.Results, measurement.Raw
+	return out, e
+}
+
+func measurePrepared(ctx context.Context, c config.Config, target *safety.Target) (out Outcome, err error) {
+	if c.Jobs < 1 || c.Jobs > target.Plan.Jobs {
+		return out, fmt.Errorf("requested jobs exceed prepared files")
+	}
+	rw, bs, depths := profile(c)
+	block := uint64(4096)
+	if bs == "1m" {
+		block = 1 << 20
+	}
+	if target.Plan.FileBytes%block != 0 {
+		return out, fmt.Errorf("prepared size is not aligned to workload block size")
+	}
+	// Thread jobs remain in the owned fio process; forked fio workers call setsid
+	// and can escape process-group cancellation before the parent can reap them.
+	base := []string{"--thread=1", "--output-format=json+", "--eta=never", "--ioengine=" + c.Engine, "--direct=" + strconv.Itoa(boolInt(c.Direct)), "--size=" + strconv.FormatUint(target.Plan.FileBytes, 10), "--refill_buffers=1", "--scramble_buffers=1", "--randrepeat=1", "--group_reporting=0", "--allow_file_create=0", "--unlink=0", "--unlink_each_loop=0", "--fallocate=none", "--invalidate=1", "--buffer_compress_percentage=0", "--dedupe_percentage=0"}
 	for _, depth := range depths {
 		for repeat := 0; repeat < c.Repetitions; repeat++ {
 			if err = ctx.Err(); err != nil {
@@ -160,7 +179,7 @@ func RunManaged(ctx context.Context, c config.Config, _ string) (out Outcome, er
 			for i := 0; i < c.Jobs; i++ {
 				args = append(args, fmt.Sprintf("--name=job-%03d", i+1), fmt.Sprintf("--filename=/proc/self/fd/%d", 3+i))
 			}
-			b, e := runner.RunFiles(ctx, "fio", args, time.Duration(c.Duration+c.Warmup+30)*time.Second, target.EngineFiles())
+			b, e := runner.RunFiles(ctx, "fio", args, time.Duration(c.Duration+c.Warmup+30)*time.Second, target.EngineFiles()[:c.Jobs])
 			if e != nil {
 				return out, fmt.Errorf("fio %s at QD%d repetition %d in workspace %q: %w", c.Profile, depth, repeat+1, target.Dir, e)
 			}

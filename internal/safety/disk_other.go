@@ -22,6 +22,9 @@ func Prepare(path, id string, size int64, jobs int) (*Target, error) {
 func PrepareSized(path, id string, size int64, jobs int, automatic bool) (*Target, error) {
 	return nil, fmt.Errorf("disk benchmarking requires Linux")
 }
+func PrepareReserved(path, id string, size int64, jobs int, automatic bool, reserve uint64) (*Target, error) {
+	return nil, fmt.Errorf("disk benchmarking requires Linux")
+}
 func (t *Target) Paths() []string         { return nil }
 func (t *Target) EngineFiles() []*os.File { return nil }
 func (t *Target) Fill(ctx context.Context, seed uint64, progress func(int, int)) error {

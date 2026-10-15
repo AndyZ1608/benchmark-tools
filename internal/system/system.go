@@ -13,6 +13,12 @@ type Info struct {
 	LogicalCPUs                                                                  int
 	Capacity                                                                     float64
 	AvailableMemory, MemoryLimit                                                 int64
+	TotalMemory, LastLevelCache                                                  int64
+	NUMANodes                                                                    int
+	CPUFlags, MemoryPressure                                                     string
+	SwapIn, SwapOut                                                              uint64
+	Interfaces                                                                   []Interface
+	DetectionWarnings                                                            []string
 	Raw                                                                          map[string]string
 }
 
@@ -126,5 +132,6 @@ func Detect() Info {
 		}
 	}
 
+	enrich(&s, "")
 	return s
 }

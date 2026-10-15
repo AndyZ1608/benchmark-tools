@@ -11,7 +11,7 @@ type CPUCounters struct {
 }
 
 func Counters() CPUCounters {
-	c := CPUCounters{Throttling: Read("/sys/fs/cgroup/cpu.stat")}
+	c := CPUCounters{Throttling: Throttling()}
 	lines := strings.Split(Read("/proc/stat"), "\n")
 	v := strings.Fields(lines[0])
 	if len(v) < 9 {

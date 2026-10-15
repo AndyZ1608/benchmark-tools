@@ -3,6 +3,7 @@ package cpu
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"vmbench/internal/statistics"
 )
 
@@ -36,7 +37,7 @@ func Parse(b []byte) (NativeResult, error) {
 		return r, fmt.Errorf("incompatible native benchmark result")
 	}
 	for _, m := range r.Measurements {
-		if m.Errors != 0 || m.Elapsed <= 0 || m.Value <= 0 {
+		if m.Errors != 0 || m.Elapsed <= 0 || m.Value <= 0 || math.IsNaN(m.Value) || math.IsInf(m.Value, 0) || math.IsNaN(m.Elapsed) || math.IsInf(m.Elapsed, 0) {
 			return r, fmt.Errorf("native workload failed validation: %s", m.Workload)
 		}
 	}

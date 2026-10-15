@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"vmbench/internal/benchmark/memory"
 	"vmbench/internal/benchmark/network"
 	"vmbench/internal/config"
+	"vmbench/internal/platform"
 	"vmbench/internal/presentation"
 	"vmbench/internal/report"
 	"vmbench/internal/runner"
@@ -27,8 +29,11 @@ import (
 )
 
 const helpBody = ` - offline Linux VM benchmarking
-Commands: cpu test | cpu stress | ram test | ram stress | disk test
-          network server | network test | full test | system info | version
+Primary commands: quick | standard | max
+  quick: fast preliminary check; standard: repeated evaluation; max: bounded discovery
+  Use MODE --help for automatic options, --disk-path and --network-peer.
+Advanced commands: cpu test | cpu stress | ram test | ram stress | disk test
+                   network server | network test | full test | system info | version | doctor
 Flags: --version|-v | --help
        --preset quick|standard|precision --config FILE --non-interactive
        --workers N --duration SECONDS --warmup SECONDS --repetitions N
@@ -51,17 +56,33 @@ func main() {
 func run() error {
 	a := os.Args[1:]
 	if len(a) == 0 {
-		fmt.Print(helpText(), "\nSelect command (e.g. cpu test): ")
-		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		a = strings.Fields(line)
+		mode, err := selectMode(os.Stdin, os.Stdout)
+		if err != nil {
+			return err
+		}
+		if mode == "" {
+			return nil
+		}
+		a = []string{mode}
 	}
+	if len(a) > 0 && (a[0] == "quick" || a[0] == "standard" || a[0] == "max") {
+		return runAutomatic(a[0], a[1:])
+	}
+
 	if len(a) == 1 && (a[0] == "--help" || a[0] == "help") {
 		fmt.Print(helpText())
 		return nil
 	}
 	if len(a) == 1 && (a[0] == "version" || a[0] == "--version" || a[0] == "-v") {
-		fmt.Printf("VMBench %s; kernel v1; native flags -O2 -fno-fast-math -pthread\n", version.Current())
+		fmt.Printf("VMBench %s; native ABI compute-bench-v1\n", version.Current())
 		return nil
+	}
+	if len(a) == 1 && a[0] == "doctor" {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return platform.Doctor(context.Background(), os.Stdout, filepath.Dir(exe))
 	}
 	if len(a) < 2 {
 		return fmt.Errorf("expected component and action; use --help")
