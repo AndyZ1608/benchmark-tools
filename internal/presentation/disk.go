@@ -216,6 +216,11 @@ func diskModule(r report.Report, m Module, threshold float64) Module {
 	if r.Settings.Details {
 		t := Table{Title: "fio results (separate distributions)", Headers: []string{text("count"), "Job", text("direction"), "IOPS", "MiB/s", "Average ms", "p95 ms", "p99 ms", "p99.9 ms", text("elapsed")}}
 		for i, run := range runs {
+			for _, observation := range run.Accounting {
+				if observation.ByteDifference != "0" {
+					m.Notes = append(m.Notes, fmt.Sprintf("Run %d %s %s: io_bytes=%d, total_ios=%d, byte difference=%s; %s", i+1, observation.Job, observation.Direction, observation.IOBytes, observation.TotalIOs, observation.ByteDifference, observation.Explanation))
+				}
+			}
 			for j, job := range run.Jobs {
 				for _, d := range []struct {
 					name string

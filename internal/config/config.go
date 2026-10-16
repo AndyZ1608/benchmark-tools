@@ -12,6 +12,7 @@ import (
 )
 
 type Config struct {
+	FIODiagnostics                                                                                 string // Optional directory for failed fio output only.
 	Preset, Path, Profile, Engine, Target, Bind, Method, Size, FileSize, Window, Bitrate, DataSeed string
 	Workers, Duration, Warmup, Repetitions, Depth, Jobs, Port, Streams, Load, Sample, Packet       int
 	NonInteractive, ConfirmWrites, Direct, UDP, Reverse, Bidir, Precondition                       bool
@@ -117,6 +118,7 @@ func parse(args []string, diskCommand bool) (Config, error) {
 	f.SetOutput(io.Discard) // Return one error; main owns terminal diagnostics.
 	f.StringVar(&file, "config", file, "flat YAML configuration")
 	f.StringVar(&c.Preset, "preset", c.Preset, "quick, standard, precision")
+	f.StringVar(&c.FIODiagnostics, "fio-diagnostics", "", "retain failed fio output in this directory only")
 	for _, v := range []struct {
 		k string
 		p *string

@@ -64,6 +64,8 @@ Installation state, logs, downloaded sources, caches, toolchains, and local conf
 
 The main menu has four components and Exit. A component opens its QUICK / STANDARD / MAX submenu; `0` returns to the main menu. Invalid choices retry without starting work. After a benchmark, choose Back to Main Menu or Exit. EOF and Ctrl+C end the session; active child processes are stopped and disk cleanup finishes before exit.
 
+Disk validation accounts for fio's separate queued-operation and completed-byte counters at the warmup boundary. It still rejects I/O errors, short/dropped transfers, invalid metrics, insufficient achieved depth, and unexplained counter differences. Use `--details` for accounting observations or opt in to `--fio-diagnostics .vmbench/fio-failures` to retain failed fio output only. See [fio accounting evidence and validation policy](docs/FIO-ACCOUNTING.md).
+
 CPU and RAM detect safe resource settings automatically. Disk asks for an existing writable directory and checks safety and free space; invalid paths can be retried or abandoned with `0`. No mount point is created or default system directory selected. Network asks for a trusted remote server IP if none is configured. It rejects loopback and this VM's own addresses, and displays the server command and port requirements.
 
 ## Benchmark commands

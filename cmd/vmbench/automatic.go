@@ -365,6 +365,7 @@ Legacy combined commands: quick | standard | max (missing endpoints are skipped)
   --include-writes --confirm-writes  Separate optional write-test authorization
   --config FILE             Optional flat automatic configuration
   --details                 Show search observations and detected resources
+  --fio-diagnostics DIRECTORY  Retain raw fio output for failed workloads only
 Safety ceilings:
   --max-workers 32 --max-ram 2GiB --max-disk-data 2GiB --min-free-disk 1GiB
   --max-disk-depth 64 --max-disk-jobs 4 --max-outstanding-io 128

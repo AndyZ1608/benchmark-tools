@@ -1,0 +1,60 @@
+{
+  "fio version": "fio-3.36",
+  "global options": {
+    "ioengine": "io_uring",
+    "rw": "randread",
+    "bs": "4k",
+    "iodepth": "2",
+    "direct": "1",
+    "time_based": "1",
+    "ramp_time": "1",
+    "runtime": "5",
+    "group_reporting": "0"
+  },
+  "jobs": [
+    {
+      "jobname": "job-001",
+      "error": 0,
+      "job options": {},
+      "read": {
+        "io_bytes": 124276736,
+        "total_ios": 30340,
+        "short_ios": 0,
+        "drop_ios": 0,
+        "iops": 6066.786643,
+        "bw_bytes": 24850377,
+        "runtime": 5001,
+        "clat_ns": {
+          "N": 30341,
+          "mean": 300000,
+          "percentile": {
+            "99.000000": 1000000
+          }
+        }
+      },
+      "write": {
+        "io_bytes": 0,
+        "total_ios": 0,
+        "short_ios": 0,
+        "drop_ios": 0,
+        "iops": 0,
+        "bw_bytes": 0,
+        "runtime": 0,
+        "clat_ns": {
+          "N": 0,
+          "mean": 0,
+          "percentile": {}
+        }
+      },
+      "iodepth_level": {
+        "1": 0.1,
+        "2": 99.9,
+        "4": 0,
+        "8": 0,
+        "16": 0,
+        "32": 0,
+        ">=64": 0
+      }
+    }
+  ]
+}

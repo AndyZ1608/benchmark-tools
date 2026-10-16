@@ -110,3 +110,13 @@ func SafeText(s string) string {
 	return out.String()
 }
 func clean(s string) string { return SafeText(s) }
+
+// SafeLines keeps structured error diagnostics readable while escaping each
+// line with the same terminal-control and ASCII policy as other output.
+func SafeLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = SafeText(lines[i])
+	}
+	return strings.Join(lines, "\n")
+}

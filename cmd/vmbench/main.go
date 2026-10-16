@@ -44,6 +44,7 @@ Flags: --version|-v | --help
        --file-size 1GiB (disk alias) --data-seed random|N --confirm-writes
        --profile randread-4k|randwrite-4k|mixed-70-30|seqread-1m|seqwrite-1m|latency|qd-scaling
        --ioengine auto|io_uring|libaio --iodepth N --numjobs N --target IP
+       --fio-diagnostics DIRECTORY (retain failed fio output only)
        --bind IP --port N --streams N --udp --bitrate 100M --reverse --bidir
        --details --stability-cv 5 --steal-warning-percent 1
 `
@@ -52,7 +53,7 @@ func helpText() string { return "VMBench " + version.Current() + helpBody }
 
 func main() {
 	if e := run(); e != nil {
-		fmt.Fprintln(os.Stderr, "ERROR:", presentation.SafeText(e.Error()))
+		fmt.Fprintln(os.Stderr, "ERROR:", presentation.SafeLines(e.Error()))
 		os.Exit(1)
 	}
 }

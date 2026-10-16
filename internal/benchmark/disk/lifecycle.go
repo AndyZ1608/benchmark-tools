@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -177,18 +176,18 @@ func measurePreparedLimited(ctx context.Context, c config.Config, target *safety
 				args = append(args, fmt.Sprintf("--name=job-%03d", i+1), fmt.Sprintf("--filename=/proc/self/fd/%d", 3+i))
 			}
 			b, e := runner.RunFiles(ctx, "fio", args, timeout, target.EngineFiles()[:c.Jobs])
-			if e != nil {
-				return out, fmt.Errorf("fio %s at QD%d repetition %d in workspace %q: %w", c.Profile, depth, repeat+1, target.Dir, e)
-			}
-			result, e := Parse(b)
+			result, parseError := Parse(b)
 			if e == nil {
-				e = validateMeasurement(result, c, rw)
+				e = parseError
+			}
+			if e == nil {
+				result.Accounting, e = validateMeasured(result, c, rw, depth, probe)
 				if e == nil {
 					_, e = ExecutionEvidence(result, c.Engine, depth)
 				}
 			}
 			if e != nil {
-				return out, fmt.Errorf("invalid fio result for %s QD%d repetition %d: %w", c.Profile, depth, repeat+1, e)
+				return out, measurementFailure(c, depth, repeat+1, result, b, e)
 			}
 			out.Results = append(out.Results, result)
 			out.Raw = append(out.Raw, json.RawMessage(b))
@@ -204,60 +203,4 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-func validateMeasurement(result Result, c config.Config, rw string) error {
-	if len(result.Jobs) != c.Jobs {
-		return fmt.Errorf("expected %d independent jobs; received %d", c.Jobs, len(result.Jobs))
-	}
-	for i, job := range result.Jobs {
-		directions := []struct {
-			name  string
-			value Direction
-		}{}
-		if rw == "randread" || rw == "read" || rw == "randrw" {
-			directions = append(directions, struct {
-				name  string
-				value Direction
-			}{"read", job.Read})
-		}
-		if rw == "randwrite" || rw == "write" || rw == "randrw" {
-			directions = append(directions, struct {
-				name  string
-				value Direction
-			}{"write", job.Write})
-		}
-		for _, direction := range directions {
-			v := direction.value
-			if v.TotalIOs == 0 || v.IOBytes == 0 || v.ShortIOs != 0 || v.DropIOs != 0 {
-				return fmt.Errorf("job-%03d %s completed I/O counters missing, zero, short or dropped", i+1, direction.name)
-			}
-			_, bs, _ := profile(c)
-			block := uint64(4096)
-			if bs == "1m" {
-				block = 1 << 20
-			}
-			if v.IOBytes%v.TotalIOs != 0 || v.IOBytes/v.TotalIOs != block {
-				return fmt.Errorf("job-%03d %s completed byte/count evidence is inconsistent with block size", i+1, direction.name)
-			}
-			for _, metric := range []struct {
-				name  string
-				value float64
-			}{{"IOPS", v.IOPS}, {"bandwidth", v.BWBytes}, {"runtime", v.Runtime}, {"average completion latency", v.Completion.Mean}} {
-				if metric.value <= 0 || math.IsNaN(metric.value) || math.IsInf(metric.value, 0) {
-					return fmt.Errorf("job-%03d %s %s is missing or invalid", i+1, direction.name, metric.name)
-				}
-			}
-			percentile := false
-			for key, value := range v.Completion.Percentile {
-				p, e := strconv.ParseFloat(key, 64)
-				if e == nil && p == 99 && value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0) {
-					percentile = true
-				}
-			}
-			if !percentile {
-				return fmt.Errorf("job-%03d %s p99 completion latency is missing or invalid", i+1, direction.name)
-			}
-		}
-	}
-	return nil
 }

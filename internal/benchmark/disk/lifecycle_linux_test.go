@@ -138,14 +138,32 @@ func fakeFio() {
 	if get("bs") == "1m" {
 		block = 1 << 20
 	}
-	value := Direction{TotalIOs: ios, IOBytes: ios * block, IOPS: 100, BWBytes: 409600, Runtime: runTime * 1000, Completion: Latency{Mean: 10000, Percentile: map[string]float64{"99.000000": 20000}}}
-	result := Result{Options: map[string]string{"ioengine": get("ioengine")}}
-	for range names {
+	value := Direction{TotalIOs: ios, IOBytes: ios * block, IOPS: float64(ios) / runTime, BWBytes: float64(uint64(float64(ios*block) / runTime)), Runtime: runTime * 1000, Completion: Latency{Mean: 10000, Percentile: map[string]float64{"99.000000": 20000}}}
+	if mode == "accounting" || mode == "large-mismatch" {
+		delta := uint64(1)
+		if mode == "large-mismatch" {
+			d, _ := strconv.Atoi(get("iodepth"))
+			delta = uint64(d + 1)
+		}
+		value.IOBytes += delta * block
+		value.BWBytes = float64(uint64(float64(value.IOBytes) / runTime))
+	}
+	if mode == "short" {
+		value.ShortIOs = 1
+	}
+	result := Result{Version: "fio-3.36", Options: map[string]string{}}
+	for _, key := range []string{"ioengine", "rw", "bs", "direct", "time_based", "ramp_time", "iodepth", "group_reporting"} {
+		result.Options[key] = get(key)
+	}
+	for index := range names {
 		bucket := get("iodepth")
 		if bucket == "64" {
 			bucket = ">=64"
 		}
-		job := Job{Depth: map[string]float64{bucket: 100}}
+		job := Job{Name: fmt.Sprintf("job-%03d", index+1), Depth: map[string]float64{bucket: 100}}
+		if mode == "job-error" {
+			job.Error = 5
+		}
 		if mode == "depth-one" {
 			job.Depth = map[string]float64{"1": 100}
 		}

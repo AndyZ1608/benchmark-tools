@@ -319,6 +319,7 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 	c.FileSize = strconv.FormatInt(size, 10)
 	c.DiskSizeExplicit = true
 	c.Engine = o.DiskEngine
+	c.FIODiagnostics = o.FIODiagnostics
 	c.ConfirmWrites = o.ConfirmWrites
 	reserve, _ := config.Bytes(o.MinFree)
 	if progress != nil {
@@ -384,6 +385,13 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 			if e != nil {
 				return Sample{}, e
 			}
+			if o.Details {
+				for _, observation := range r.Accounting {
+					if observation.ByteDifference != "0" {
+						evidence += fmt.Sprintf("; %s %s io_bytes=%d total_ios=%d difference=%s B (%s)", observation.Job, observation.Direction, observation.IOBytes, observation.TotalIOs, observation.ByteDifference, observation.Explanation)
+					}
+				}
+			}
 			sample := Sample{Raw: r, Evidence: evidence, P99LowMS: math.Inf(1), MeanLowMS: math.Inf(1), Extras: map[string]float64{}}
 			for _, job := range r.Jobs {
 				directions := []disk.Direction{job.Read}
@@ -439,7 +447,8 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 		for _, depth := range depths {
 			initial = append(initial, Setting{Depth: depth, Jobs: 1})
 		}
-		if err = ex.survey(ctx, initial, o.Mode == "max"); err != nil {
+		// Complete the bounded Disk depth sweep before confirming a MAX result.
+		if err = ex.survey(ctx, initial, false); err != nil {
 			return
 		}
 		if o.Mode == "max" {

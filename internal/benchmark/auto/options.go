@@ -16,6 +16,7 @@ import (
 )
 
 type Options struct {
+	FIODiagnostics                                                                 string
 	Component                                                                      string // Empty retains the legacy combined-run behavior.
 	Mode, DiskPath, NetworkPeer, ConfigFile, DiskEngine                            string
 	NonInteractive, AckMax, IncludeWrites, ConfirmWrites, Details                  bool
@@ -74,6 +75,7 @@ func ParseComponent(component, mode string, args []string) (Options, error) {
 	}
 	f := flag.NewFlagSet(mode, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	f.StringVar(&o.FIODiagnostics, "fio-diagnostics", "", "retain failed fio output in this directory only")
 	if component == "disk" {
 		f.StringVar(&o.DiskPath, "path", o.DiskPath, "existing disk target directory")
 	}

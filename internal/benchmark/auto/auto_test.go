@@ -31,6 +31,8 @@ type fakeBackend struct {
 	networkConfigs         []config.Config
 	selectedEngine         string
 	engineFailure          bool
+	failDiskDepth          int
+	diskAccounting         bool
 }
 
 func (f *fakeBackend) Detect() system.Info {
@@ -89,6 +91,9 @@ func (f *fakeBackend) OpenDisk(ctx context.Context, c config.Config, reserve uin
 func (f *fakeBackend) Measure(ctx context.Context, c config.Config) (disk.Outcome, error) {
 	f.events = append(f.events, "disk")
 	f.configs = append(f.configs, c)
+	if f.failDiskDepth == c.Depth {
+		return disk.Outcome{}, fmt.Errorf("fio completion failure at QD%d", c.Depth)
+	}
 	if f.cancel != nil {
 		f.cancel()
 		return disk.Outcome{}, ctx.Err()
@@ -105,6 +110,9 @@ func (f *fakeBackend) Measure(ctx context.Context, c config.Config) (disk.Outcom
 			bucket = ">=64"
 		}
 		r.Jobs = append(r.Jobs, disk.Job{Read: v, Write: v, Depth: map[string]float64{bucket: 100}})
+	}
+	if f.diskAccounting {
+		r.Accounting = []disk.CounterObservation{{Job: "job-001", Direction: "read", IOBytes: 413696, TotalIOs: 100, BlockBytes: 4096, ByteDifference: "+4096", Explanation: "fixture ramp accounting"}}
 	}
 	return disk.Outcome{Results: []disk.Result{r}}, nil
 }

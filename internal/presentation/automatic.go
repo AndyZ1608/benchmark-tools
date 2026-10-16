@@ -229,7 +229,7 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 		fmt.Fprintln(&b, "WARNING: "+SafeText(note))
 	}
 	for _, message := range r.Errors {
-		fmt.Fprintln(&b, "ERROR: "+SafeText(message))
+		fmt.Fprintln(&b, "ERROR: "+SafeLines(message))
 	}
 	if details {
 		s := r.Resources
