@@ -1,73 +1,77 @@
 # Illustrative benchmark summaries
 
-These deterministic fixtures demonstrate the actual renderer. Every number is synthetic; no benchmark was run on this host. Repeated fixture values demonstrate formatting, not evidence about hardware.
+All components share a compact summary. The following **synthetic examples** illustrate the actual formatting; these are not measurements of this host. Integrity failures, unsafe pressure, incomplete measurements and cleanup failures remain visible.
 
-## CPU (English, three repetitions)
-
-```text
-================================================
-VMBENCH CPU TEST
-================================================
-Status: COMPLETED
-Duration: 12.00 seconds
-
-PERFORMANCE
-------------------------------------------------
-Integer scaling efficiency   : 90.0% (4 threads)
-FP scaling efficiency        : 95.0% (4 threads)
-CPU steal time               : 0.00%
-Computation errors           : 0
-Stability                    : Stable
-
-ASSESSMENT
-------------------------------------------------
-Measurements were consistent across the completed runs. No computation errors were reported.
-Scaling measures the benefit of additional threads, not absolute CPU speed.
-================================================
-```
-
-## RAM (English, three repetitions)
+CPU displays workload throughput and scaling together. Scaling is thread efficiency, not an absolute compute score; measured steal is separate:
 
 ```text
-================================================
-VMBENCH MEMORY TEST
-================================================
+========================================
+       VMBENCH - CPU MAX
+========================================
 Status: COMPLETED
-Duration: 12.00 seconds
+Results: Maximum observed within tested limits
 
-PERFORMANCE
-------------------------------------------------
-Memory bandwidth (TRIAD)            : 28.60 GB/s
-Memory latency (dependent access)   : 85.00 ns
-Stability                           : Stable
-Integrity errors                    : 0
-
-ASSESSMENT
-------------------------------------------------
-Measurements were consistent across the completed runs. No memory integrity errors were reported.
-================================================
+Integer Compute: 3,600 defined iterations/s (scaling 90.0 %)
+Float Compute  : 1,900 defined iterations/s (scaling 95.0 %)
+CPU Steal      : 0.02 %
+Stability      : Confirmed
+========================================
 ```
 
-## Disk (English, three repetitions)
+RAM keeps the bandwidth workload explicit and shows measured dependent-access latency:
 
 ```text
-================================================
-VMBENCH DISK TEST
-================================================
+========================================
+       VMBENCH - RAM MAX
+========================================
 Status: COMPLETED
-Duration: 12.00 seconds
+Results: Maximum observed within tested limits
 
-PERFORMANCE
-------------------------------------------------
-Workload                          : Random Read 4K; QD32 x 1 jobs
-IOPS                              : 85,000 IOPS
-Throughput                        : 332.03 MiB/s
-Average latency (job/run range)   : 0.380 ms
-P99 latency (job/run range)       : 1.240 ms
-Stability                         : Stable
-
-ASSESSMENT
-------------------------------------------------
-Measurements were consistent across the completed runs.
-================================================
+Memory Bandwidth: 28.60 GB/s (TRIAD)
+Memory Latency  : 85.00 ns/access
+========================================
 ```
+
+A successful Disk MAX read result has two performance sections and four primary metrics:
+
+```text
+========================================
+       VMBENCH - DISK MAX
+========================================
+Status: COMPLETED
+Results: Maximum observed within tested limits
+Target: /data
+
+RANDOM READ 4K
+----------------------------------------
+IOPS           : 15,083
+P99 Latency    : 18.5 - 25.6 ms (job/run range)
+
+SEQUENTIAL READ
+----------------------------------------
+Throughput     : 95.61 MiB/s
+P99 Latency    : 2.02 - 2.84 s (job/run range)
+
+----------------------------------------
+Temporary Files: Cleaned
+========================================
+```
+
+Network shows only tested directions. Here both were tested; QUICK normally tests upload only and prints `Direction: Upload`. Rates below 1 Gbps use Mbps. Available TCP retransmits show a count or a per-run range, never a packet-loss percentage:
+
+```text
+========================================
+       VMBENCH - NETWORK MAX
+========================================
+Status: COMPLETED
+Results: Maximum observed within tested limits
+
+TCP Upload          : 842.00 Mbps
+Upload Retransmits  : 3 - 5 (per-run range)
+TCP Download        : 1.20 Gbps
+Download Retransmits: 3 - 5 (per-run range)
+========================================
+```
+
+
+These fixtures demonstrate presentation only. Real safety and quality warnings appear when warranted. Use `--details` or the post-run View Details option for retained diagnostics; neither view creates a JSON report.

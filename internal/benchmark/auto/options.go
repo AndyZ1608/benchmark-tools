@@ -24,6 +24,7 @@ type Options struct {
 	MaxRAM, MaxDisk, MinFree, NetworkBitrate                                       string
 	MaxDuration                                                                    time.Duration
 	MaxCV, Improvement                                                             float64
+	DiskP99WarningMS                                                               float64 // Presentation only; zero disables optional latency warnings.
 }
 
 func Defaults(mode string) Options {
@@ -103,6 +104,7 @@ func ParseComponent(component, mode string, args []string) (Options, error) {
 	f.DurationVar(&o.MaxDuration, "max-duration", o.MaxDuration, "complete run time ceiling")
 	f.Float64Var(&o.MaxCV, "max-cv", o.MaxCV, "maximum confirmation CV, fraction")
 	f.Float64Var(&o.Improvement, "saturation-improvement", o.Improvement, "heuristic relative improvement, fraction")
+	f.Float64Var(&o.DiskP99WarningMS, "disk-p99-warning-ms", o.DiskP99WarningMS, "warn when a workload job/run P99 exceeds this many ms; 0 disables")
 	if e := f.Parse(append(fromFile, args...)); e != nil {
 		return o, e
 	}
@@ -124,6 +126,9 @@ func (o Options) Selects(module string) bool {
 	return o.Component == "" || strings.ToUpper(o.Component) == module || o.Component == "ram" && module == "MEMORY"
 }
 func (o Options) Validate() error {
+	if !finite(o.DiskP99WarningMS) || o.DiskP99WarningMS < 0 {
+		return fmt.Errorf("disk-p99-warning-ms must be finite and nonnegative (0 disables)")
+	}
 	if o.DiskEngine != "auto" && o.DiskEngine != "io_uring" && o.DiskEngine != "libaio" {
 		return fmt.Errorf("Disk ioengine must be auto, io_uring or libaio")
 	}

@@ -123,6 +123,20 @@ func TestNavigationWithoutLoads(t *testing.T) {
 		})
 	}
 }
+
+func TestMenuViewsRetainedDetailsWithoutRerunning(t *testing.T) {
+	var calls []automatic.Options
+	a := menuFixture(&calls)
+	details := 0
+	var output bytes.Buffer
+	a.details = func() error { details++; fmt.Fprintln(&output, "Retained fixture details"); return nil }
+	if err := interactiveSession(context.Background(), strings.NewReader("1\n1\n2\n2\n0\n"), &output, a); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || details != 2 || strings.Count(output.String(), "Retained fixture details") != 2 || !strings.Contains(output.String(), "[2] View Details") {
+		t.Fatal(calls, details, output.String())
+	}
+}
 func TestRetryAndReturnToMainWithoutStateCarryover(t *testing.T) {
 	var calls []automatic.Options
 	var out bytes.Buffer

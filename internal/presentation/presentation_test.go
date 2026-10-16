@@ -58,12 +58,12 @@ func output(t *testing.T, r report.Report) string {
 func TestCPUSummaryAndMissingSteal(t *testing.T) {
 	r := nativeFixture("cpu test", 1)
 	s := output(t, r)
-	for _, want := range []string{"COMPLETED", "90.0%", "95.0%", "Integer", "FP", "Insufficient data", "N/A", "Computation errors"} {
+	for _, want := range []string{"COMPLETED", "90.0 %", "95.0 %", "Integer Compute", "Float Compute", "Insufficient data", "360 defined iterations/s", "190 defined iterations/s"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
 	}
-	if strings.Contains(s, "0.00%") || strings.Contains(s, "\"cpu_telemetry\"") {
+	if strings.Contains(s, "CPU Steal") || strings.Contains(s, "N/A") || strings.Contains(s, "Computation errors") || strings.Contains(s, "\"cpu_telemetry\"") {
 		t.Fatal(s)
 	}
 	m := Modules(r)[0]
@@ -96,7 +96,7 @@ func TestStabilityEvidence(t *testing.T) {
 func TestEnglishLabelsAndFormatting(t *testing.T) {
 	r := nativeFixture("ram test", 3)
 	s := output(t, r)
-	for _, want := range []string{"COMPLETED", "Memory bandwidth (TRIAD)", "Memory latency (dependent access)", "Stable", "28.60 GB/s", "85.00 ns"} {
+	for _, want := range []string{"COMPLETED", "Memory Bandwidth", "Memory Latency", "Stable", "28.60 GB/s (TRIAD)", "85.00 ns/access"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
 		}
@@ -131,6 +131,13 @@ func diskFixture(profile string, n int) report.Report {
 func TestMixedDiskSeparatesPercentilesAndUnits(t *testing.T) {
 	r := diskFixture("mixed-70-30", 3)
 	s := output(t, r)
+	for _, want := range []string{"Read IOPS      : 70", "Write IOPS     : 30", "20.00 us (job/run range)", "40.00 us (job/run range)"} {
+		if !strings.Contains(s, want) {
+			t.Fatal(s)
+		}
+	}
+	r.Settings.Details = true
+	s = output(t, r)
 	for _, want := range []string{"Read 70 IOPS / Write 30 IOPS", "Read 0.27 MiB/s / Write 0.12 MiB/s", "Read 0.020 ms / Write 0.040 ms", "Stable"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q: %s", want, s)
@@ -151,7 +158,7 @@ func TestDiskPercentileRangeAcrossJobsAndRuns(t *testing.T) {
 	runs[1] = disk.Result{Jobs: []disk.Job{{Read: disk.Direction{IOPS: 75, BWBytes: 300000, Completion: disk.Latency{Percentile: map[string]float64{"99.000000": 80000}}}}}}
 	r.Results["disk test"] = runs
 	s := output(t, r)
-	if !strings.Contains(s, "0.020 - 0.080 ms") || strings.Contains(s, "0.050 ms") {
+	if !strings.Contains(s, "20.00 - 80.00 us") || strings.Contains(s, "50.00 us") {
 		t.Fatal(s)
 	}
 }
@@ -161,6 +168,11 @@ func TestQueueDepthScaling(t *testing.T) {
 	last := disk.Result{Jobs: []disk.Job{{Read: disk.Direction{IOPS: 140, BWBytes: 573440, Completion: disk.Latency{Percentile: map[string]float64{"99.000000": 80000}}}}}}
 	r.Results["disk test"] = []disk.Result{base, base, base, base, last}
 	s := output(t, r)
+	if strings.Contains(s, "QD64") || !strings.Contains(s, "80.00 us") {
+		t.Fatal(s)
+	}
+	r.Settings.Details = true
+	s = output(t, r)
 	for _, want := range []string{"QD1", "QD64", "2.00x", "0.080 ms"} {
 		if !strings.Contains(s, want) {
 			t.Fatal(want, s)
@@ -186,7 +198,7 @@ func TestUDPAndBidirectionalPreserveDirections(t *testing.T) {
 	r.Settings.Bidir = true
 	r.Results["network test"] = []network.Result{{End: json.RawMessage(`{"sum_received":{"bits_per_second":100000000,"seconds":10,"jitter_ms":0.3,"lost_percent":2},"sum_received_bidir_reverse":{"bits_per_second":90000000,"seconds":10,"jitter_ms":0.4,"lost_percent":5}}`)}}
 	s := output(t, r)
-	for _, want := range []string{"0.10 Gbps", "0.09 Gbps", "2.00%", "5.00%", "0.300 ms", "0.400 ms"} {
+	for _, want := range []string{"100.00 Mbps", "90.00 Mbps", "2.00 %", "5.00 %", "0.300 ms", "0.400 ms"} {
 		if !strings.Contains(s, want) {
 			t.Fatal(want, s)
 		}

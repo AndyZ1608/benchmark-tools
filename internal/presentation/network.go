@@ -146,6 +146,14 @@ func networkModule(r report.Report, m Module) Module {
 		filtered.Rows = append(filtered.Rows, values)
 	}
 	m.Tables = append(m.Tables, filtered)
+	for _, direction := range reportNetworkDirections(r) {
+		for _, warning := range direction.observations.warnings {
+			m.Warnings = append(m.Warnings, direction.name+": "+warning)
+			if m.Status == "completed" {
+				m.Status = "partial"
+			}
+		}
+	}
 	return m
 }
 func netRow(run int, direction string, v transfer) []string {

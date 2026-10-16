@@ -8,13 +8,16 @@ import (
 )
 
 func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
+	if !details {
+		return renderAutomaticCompact(w, r)
+	}
 	var b strings.Builder
 	title := strings.ToUpper(SafeText(r.Mode))
 	if r.Limits.Component != "" {
 		title = strings.ToUpper(SafeText(r.Limits.Component)) + " - " + title
 	}
 	fmt.Fprintf(&b, "================================================\nVMBENCH - %s PERFORMANCE\n================================================\n", title)
-	fmt.Fprintf(&b, "Status: %s\nDuration: %.1f seconds\n", SafeText(r.Status), r.Duration.Seconds())
+	fmt.Fprintf(&b, "Status: %s\nDuration: %.1f seconds\n", SafeText(automaticDisplayStatus(r)), r.Duration.Seconds())
 	for _, m := range []struct {
 		name  string
 		peaks []automatic.Peak
@@ -68,12 +71,15 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 			case "mixed-70-30":
 				name = "Mixed 70/30 (total IOPS)"
 			}
-			if peak.Best == nil {
-				fmt.Fprintf(&b, "%s: N/A\n", name)
+			if !displayablePeak(peak) {
+				fmt.Fprintf(&b, "%s: No validated result\n", name)
 			} else {
 				best := peak.Best
 				prefix := ""
-				if r.Mode == "max" && peak.Confirmed {
+				if len(automaticInvalidEvidence(peak)) > 0 {
+					prefix = "Invalid retained observation - "
+				}
+				if r.Mode == "max" && peak.Confirmed && len(automaticInvalidEvidence(peak)) == 0 {
 					prefix = "Maximum Observed "
 					if peak.Name == "randread-4k" {
 						name = "IOPS (Random Read 4K)"
@@ -81,18 +87,25 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 				}
 				fmt.Fprintf(&b, "%s%s: %s\nConfiguration: %s\n", prefix, name, unit(best.Stats.Median, SafeText(peak.Unit), 2), best.Setting.String())
 				if best.Setting.Depth > 0 {
-					var bandwidth, means, percentiles []float64
-					for _, s := range best.Samples {
-						bandwidth = append(bandwidth, s.MiBps)
-						means = append(means, s.MeanMS)
-						if s.MeanLowMS > 0 {
-							means = append(means, s.MeanLowMS)
+					var bandwidth, means []float64
+					for _, sample := range best.Samples {
+						if finite(sample.MiBps) && sample.MiBps > 0 {
+							bandwidth = append(bandwidth, sample.MiBps)
 						}
-						percentiles = append(percentiles, s.P99LowMS, s.P99HighMS)
+						for _, mean := range []float64{sample.MeanMS, sample.MeanLowMS} {
+							if finite(mean) && mean > 0 {
+								means = append(means, mean)
+							}
+						}
 					}
-					fmt.Fprintf(&b, "Throughput: %s\nAverage completion latency (job/run range): %s\nP99 completion latency (job/run range): %s\n", medianText(bandwidth, "MiB/s", 2), rangeText(means, "ms", 3), rangeText(percentiles, "ms", 3))
-					if len(best.Samples) > 0 {
-						fmt.Fprintln(&b, "Observed depth: "+SafeText(best.Samples[0].Evidence))
+					if len(bandwidth) > 0 {
+						fmt.Fprintf(&b, "Throughput: %s\n", medianText(bandwidth, "MiB/s", 2))
+					}
+					if len(means) > 0 {
+						fmt.Fprintf(&b, "Average completion latency (job/run range): %s\n", latencyRange(means))
+					}
+					if values := automaticP99(*best); len(values) > 0 {
+						fmt.Fprintf(&b, "P99 completion latency (job/run range): %s\n", latencyRange(values))
 					}
 					if peak.Name == "mixed-70-30" {
 						for _, key := range []string{"Read IOPS", "Write IOPS", "Read MiB/s", "Write MiB/s"} {
@@ -102,27 +115,24 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 									values = append(values, v)
 								}
 							}
-							fmt.Fprintf(&b, "%s: %s\n", key, medianText(values, "", 2))
+							if len(values) > 0 {
+								fmt.Fprintf(&b, "%s: %s\n", key, medianText(values, "", 2))
+							}
 						}
 						fmt.Fprintln(&b, "Latency ranges above contain separate read/write job values; percentiles are not pooled")
 					}
+					renderAutomaticDiskDetails(&b, *best)
+				}
+				if m.name == "NETWORK" {
+					renderAutomaticNetwork(&b, peak, len(m.peaks) > 1)
 				}
 				if m.name == "CPU" {
-					baseline := 0.0
-					baselineConfirmed := false
-					for _, t := range peak.Trials {
-						if t.Setting.Workers == 1 {
-							baseline = t.Stats.Median
-							baselineConfirmed = t.Stable && t.Duration == best.Duration
-						}
+					if efficiency, _, ok := automaticEfficiency(peak); ok {
+						fmt.Fprintf(&b, "Scaling efficiency: %s\n", unit(efficiency, "%", 1))
 					}
-					if baseline > 0 {
-						fmt.Fprintf(&b, "Scaling efficiency: %s\n", unit(100*best.Stats.Median/baseline/float64(best.Setting.Workers), "%", 1))
-						if !baselineConfirmed && r.Mode != "quick" {
-							fmt.Fprintln(&b, "Scaling baseline is exploratory; efficiency has limited confirmation")
-						}
+					if errors, ok := automaticIntegrity(*best); ok {
+						fmt.Fprintf(&b, "Computation integrity errors: %d\n", errors)
 					}
-					fmt.Fprintln(&b, "Computation integrity errors: 0")
 				}
 				if m.name == "MEMORY" {
 					latency := []float64{}
@@ -131,16 +141,21 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 							latency = append(latency, s.LatencyNS)
 						}
 					}
-					fmt.Fprintf(&b, "Memory latency: %s\nIntegrity errors: 0\n", medianText(latency, "ns/access", 2))
+					if len(latency) > 0 {
+						fmt.Fprintf(&b, "Memory latency: %s\n", medianText(latency, "ns/access", 2))
+					}
+					if errors, ok := automaticIntegrity(*best); ok {
+						fmt.Fprintf(&b, "Integrity errors: %d\n", errors)
+					}
+				}
+				if m.name == "CPU" || m.name == "MEMORY" {
+					renderAutomaticNativeDetails(&b, *best)
 				}
 				if peak.Confirmed {
 					fmt.Fprintf(&b, "Stability: confirmed (%d repetitions of %ds, CV %.1f%%)\n", best.Stats.Count, best.Duration, 100*best.Stats.CV)
 				} else {
 					fmt.Fprintln(&b, "Stability: preliminary; insufficient confirmation")
 				}
-			}
-			for _, note := range peak.Notes {
-				fmt.Fprintln(&b, "Note: "+SafeText(note))
 			}
 			if len(peak.Trials) > 0 {
 				seen := map[automatic.Setting]bool{}
@@ -160,9 +175,7 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 			}
 			if details {
 				fmt.Fprintln(&b, "Searched configurations (intermediate measurements):")
-				for _, t := range peak.Trials {
-					fmt.Fprintf(&b, "  %s: %s, CV %.1f%%, n=%d, %ds measurement\n", t.Setting.String(), unit(t.Stats.Median, SafeText(peak.Unit), 2), 100*t.Stats.CV, t.Stats.Count, t.Duration)
-				}
+				renderAutomaticTrials(&b, peak)
 				if peak.Best != nil && len(peak.Best.Samples) > 0 {
 					for _, key := range []string{"copy GB/s", "scale GB/s", "add GB/s", "Read IOPS", "Write IOPS", "CPU steal percent", "Throttled periods"} {
 						var v []float64
@@ -200,32 +213,7 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 		}
 		fmt.Fprintf(&b, "Total time ceiling: %s\n", o.MaxDuration)
 	}
-	warnings := append([]string{}, r.Warnings...)
-	if r.DiskInfo.System {
-		warnings = append(warnings, "Disk target is on the system filesystem; other applications may be affected")
-	}
-	for _, peak := range r.CPU {
-		if peak.Best != nil {
-			for _, s := range peak.Best.Samples {
-				if n, ok := s.Extras["CPU steal percent"]; ok && n >= 1 {
-					warnings = append(warnings, "CPU steal observed during confirmation; host contention may affect results")
-				}
-				if s.Extras["Throttled periods"] > 0 {
-					warnings = append(warnings, "CPU cgroup throttling observed during confirmation")
-				}
-			}
-		}
-	}
-	for _, peak := range r.Memory {
-		if peak.Best != nil {
-			for _, s := range peak.Best.Samples {
-				if s.Extras["Swap pages in"] > 0 || s.Extras["Swap pages out"] > 0 {
-					warnings = append(warnings, "Guest swap activity occurred during RAM confirmation; main-memory bandwidth interpretation is limited")
-				}
-			}
-		}
-	}
-	for _, note := range unique(warnings) {
+	for _, note := range automaticWarnings(r, true) {
 		fmt.Fprintln(&b, "WARNING: "+SafeText(note))
 	}
 	for _, message := range r.Errors {

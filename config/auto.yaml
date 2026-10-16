@@ -12,5 +12,7 @@ max-outstanding-io: 128
 max-network-streams: 8
 network-bitrate: 1G
 max-duration: 30m
+# Optional display warning: highest job/run P99 above N ms; 0 disables.
+# disk-p99-warning-ms: 0
 include-writes: false
 # ack-max and confirm-writes must be supplied for each invocation, never saved.

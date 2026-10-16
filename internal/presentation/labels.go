@@ -4,6 +4,7 @@ var words = map[string]string{
 	"average":         "Average latency (job/run range)",
 	"completed":       "COMPLETED",
 	"failed":          "FAILED",
+	"partial":         "PARTIAL",
 	"skipped":         "SKIPPED",
 	"not_run":         "NOT RUN",
 	"running":         "In progress",

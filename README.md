@@ -62,7 +62,7 @@ Update a clean checkout with `git pull --ff-only`, then run `./start.sh`. Initia
 
 Installation state, logs, downloaded sources, caches, toolchains, and local configuration belong under the ignored `.vmbench/` directory. Executables (`vmbench`, `engines/`) and build/release outputs (`.build/`, `vendor-engines/`, `dist/`) are also ignored. Tracked `third-party/` archives and `config/` examples are read-only installation inputs. Put automatic-mode overrides in `.vmbench/auto.yaml` instead of editing the tracked examples. Rebuilding preserves local configuration and user data.
 
-The main menu has four components and Exit. A component opens its QUICK / STANDARD / MAX submenu; `0` returns to the main menu. Invalid choices retry without starting work. After a benchmark, choose Back to Main Menu or Exit. EOF and Ctrl+C end the session; active child processes are stopped and disk cleanup finishes before exit.
+The main menu has four components and Exit. A component opens its QUICK / STANDARD / MAX submenu; `0` returns to the main menu. Invalid choices retry without starting work. After a benchmark, choose View Details to inspect its retained measurements without rerunning, Back to Main Menu, or Exit. EOF and Ctrl+C end the session; active child processes are stopped and disk cleanup finishes before exit.
 
 Disk validation accounts for fio's separate queued-operation and completed-byte counters at the warmup boundary. It still rejects I/O errors, short/dropped transfers, invalid metrics, insufficient achieved depth, and unexplained counter differences. Use `--details` for accounting observations or opt in to `--fio-diagnostics .vmbench/fio-failures` to retain failed fio output only. See [fio accounting evidence and validation policy](docs/FIO-ACCOUNTING.md).
 
@@ -161,7 +161,7 @@ CPU tests count defined xorshift64 integer iterations and floating-point multipl
 
 RAM tests use STREAM-style copy/scale/add/triad bandwidth and shuffled dependent pointer chasing. Dataset size, cache size, thread count, memory pressure and NUMA placement affect interpretation. The latency path uses observable dependent loads so optimization cannot delete the loop.
 
-Disk uses fio JSON+ internally, direct asynchronous io_uring or libaio, private per-job datasets, controlled depth and jobs, and random 4K/sequential 1MiB profiles. It reports IOPS, throughput, average and P99 latency where available. MAX searches the configured parameter space and checks achieved depth/engine evidence. Automatic modes report io_uring setup restrictions and can use compiled libaio; they never substitute synchronous I/O. Advanced explicit engine requests fail if unsupported.
+Disk uses fio JSON+ internally, direct asynchronous io_uring or libaio, private per-job datasets, controlled depth and jobs, and random 4K/sequential 1MiB profiles. The default automatic summary reports random-read IOPS, sequential throughput and separate job/run P99 latency ranges. Average latency and per-job P95/P99 remain available with `--details`. MAX searches the configured parameter space and checks achieved depth/engine evidence. Automatic modes report io_uring setup restrictions and can use compiled libaio; they never substitute synchronous I/O. Advanced explicit engine requests fail if unsupported.
 
 Network uses iperf3, a literal trusted peer IP and controlled TCP streams. Optional options are checked against installed iperf3 help before the workload. A peer is required to measure a path; initialization never starts a network server. Use matching peer features and trusted networks. See [methodology](docs/BENCHMARK-METHODOLOGY.md) and [automatic modes](docs/AUTOMATIC.md).
 
@@ -173,25 +173,93 @@ Abrupt machine/process termination can leave owned data and recovery metadata; u
 
 ## Example results
 
-The following are **illustrative status excerpts**, not recorded measurements or complete console transcripts. No performance numbers are invented.
+All components share a compact summary. The following **synthetic examples** illustrate the actual formatting; these are not measurements of this host. Integrity failures, unsafe pressure, incomplete measurements and cleanup failures remain visible.
+
+CPU displays workload throughput and scaling together. Scaling is thread efficiency, not an absolute compute score; measured steal is separate:
 
 ```text
-VMBENCH - CPU - QUICK PERFORMANCE
-CPU - COMPLETED
-Integer throughput
-FP throughput
+========================================
+       VMBENCH - CPU MAX
+========================================
+Status: COMPLETED
+Results: Maximum observed within tested limits
 
-VMBENCH - RAM - STANDARD PERFORMANCE
-RAM - COMPLETED
-TRIAD bandwidth
-Memory latency
-
-VMBENCH - DISK - MAX PERFORMANCE
-DISK - COMPLETED
-Maximum Observed IOPS (Random Read 4K)
-Best confirmed configuration and observed range
-Unconfirmed configurations remain labeled unconfirmed
+Integer Compute: 3,600 defined iterations/s (scaling 90.0 %)
+Float Compute  : 1,900 defined iterations/s (scaling 95.0 %)
+CPU Steal      : 0.02 %
+Stability      : Confirmed
+========================================
 ```
+
+RAM keeps the bandwidth workload explicit and shows measured dependent-access latency:
+
+```text
+========================================
+       VMBENCH - RAM MAX
+========================================
+Status: COMPLETED
+Results: Maximum observed within tested limits
+
+Memory Bandwidth: 28.60 GB/s (TRIAD)
+Memory Latency  : 85.00 ns/access
+========================================
+```
+
+A successful Disk MAX read result has two performance sections and four primary metrics:
+
+```text
+========================================
+       VMBENCH - DISK MAX
+========================================
+Status: COMPLETED
+Results: Maximum observed within tested limits
+Target: /data
+
+RANDOM READ 4K
+----------------------------------------
+IOPS           : 15,083
+P99 Latency    : 18.5 - 25.6 ms (job/run range)
+
+SEQUENTIAL READ
+----------------------------------------
+Throughput     : 95.61 MiB/s
+P99 Latency    : 2.02 - 2.84 s (job/run range)
+
+----------------------------------------
+Temporary Files: Cleaned
+========================================
+```
+
+Network shows only tested directions. Here both were tested; QUICK normally tests upload only and prints `Direction: Upload`. Rates below 1 Gbps use Mbps. Available TCP retransmits show a count or a per-run range, never a packet-loss percentage:
+
+```text
+========================================
+       VMBENCH - NETWORK MAX
+========================================
+Status: COMPLETED
+Results: Maximum observed within tested limits
+
+TCP Upload          : 842.00 Mbps
+Upload Retransmits  : 3 - 5 (per-run range)
+TCP Download        : 1.20 Gbps
+Download Retransmits: 3 - 5 (per-run range)
+========================================
+```
+
+P99 values are separate job/run endpoints, never averaged percentiles. QUICK results are preliminary; STANDARD includes a concise stability indicator; MAX displays validated observations within the tested limits. Missing metrics are omitted, and incomplete or unconfirmed results remain visible. CPU shows integer/FP throughput, measured multi-thread efficiency and stability; RAM shows bandwidth and latency, with integrity errors reported as warnings; Network shows tested TCP upload/download throughput and retransmits when recorded. Unmeasured network loss, jitter and RTT are omitted.
+
+Use the same `--details` option for each component to inspect configuration, dataset, native measurements, engine, queue depth/jobs, search trials, latency distributions, CV/repetitions and ceilings:
+
+```bash
+./vmbench cpu max --details
+./vmbench ram max --details
+./vmbench disk max --path /data --details
+./vmbench network max --target 10.0.0.20 --details
+```
+
+These commands run benchmarks and retain the usual MAX acknowledgment and write authorizations. The interactive **View Details** option displays the last in-memory result without generating any new workload. The default view keeps system-filesystem, search-boundary, cache uncertainty, unstable/incomplete measurement and cleanup warnings. Results stay in memory; no automatic JSON reports are written.
+
+Optional high-latency warnings use `--disk-p99-warning-ms N` (or `disk-p99-warning-ms: N` in local automatic YAML). The default `0` disables them. A positive finite threshold in milliseconds warns only when a tested workload's highest job/run P99 **exceeds** it; for example `--disk-p99-warning-ms 1000`. Each warning names the workload and selected threshold. This is a user-selected screening threshold, not a disk health assessment; it changes no measurement or search setting.
 
 ## CLI reference
 
@@ -204,7 +272,7 @@ Automatic flags:
 | Targets/config | `--path` (Disk), `--target` (Network); aliases `--disk-path`, `--network-peer`; `--config`, `--details`, `--non-interactive` |
 | Authorization | `--ack-max`, `--include-writes`, `--confirm-writes` |
 | CPU/RAM | `--max-workers`, `--max-ram` |
-| Disk | `--max-disk-data`, `--min-free-disk`, `--max-disk-depth`, `--max-disk-jobs`, `--max-outstanding-io` |
+| Disk | `--max-disk-data`, `--min-free-disk`, `--max-disk-depth`, `--max-disk-jobs`, `--max-outstanding-io`, `--disk-p99-warning-ms` |
 | Network | `--max-network-streams`, `--network-bitrate` |
 | Search/time | `--max-duration`, `--sample-seconds`, `--max-cv`, `--saturation-improvement` |
 

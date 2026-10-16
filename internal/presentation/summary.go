@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"vmbench/internal/benchmark/cpu"
 	"vmbench/internal/report"
 	"vmbench/internal/system"
 )
@@ -165,15 +166,24 @@ func Render(w io.Writer, r report.Report, color bool) error {
 	if _, disabled := os.LookupEnv("NO_COLOR"); disabled {
 		color = false
 	}
+	if !r.Settings.Details && r.Command != "full test" {
+		return renderCompactReport(w, r, color)
+	}
 	var b bytes.Buffer
 	modules := Modules(r)
 	if r.Command == "full test" {
 		overall := r.Status
+		if len(r.Errors) > 0 {
+			overall = "failed"
+		}
 		counts := map[string]int{}
 		for _, m := range modules {
 			counts[m.Status]++
 			if m.Status == "failed" {
 				overall = "failed"
+			}
+			if m.Status == "partial" && overall == "completed" {
+				overall = "partial"
 			}
 		}
 		fmt.Fprintln(&b, divider+"\nVMBENCH FULL TEST\n"+divider)
@@ -182,13 +192,17 @@ func Render(w io.Writer, r report.Report, color bool) error {
 		t := Table{Headers: []string{"Module", "Status", "Result"}}
 		for _, m := range modules {
 			value := brief(m)
-			if m.Status == "failed" {
+			if m.Status == "failed" || m.Status == "partial" {
 				value = "Partial observations: " + value
 			}
 			t.Rows = append(t.Rows, []string{strings.ToUpper(strings.Fields(m.Command)[0]), text(m.Status), value})
 		}
 		table(&b, t)
-		fmt.Fprintf(&b, "\nOverall: %d completed, %d skipped, %d failed, %d not run\n", counts["completed"], counts["skipped"], counts["failed"], counts["not_run"])
+		if counts["partial"] > 0 {
+			fmt.Fprintf(&b, "\nOverall: %d completed, %d skipped, %d failed, %d partial, %d not run\n", counts["completed"], counts["skipped"], counts["failed"], counts["partial"], counts["not_run"])
+		} else {
+			fmt.Fprintf(&b, "\nOverall: %d completed, %d skipped, %d failed, %d not run\n", counts["completed"], counts["skipped"], counts["failed"], counts["not_run"])
+		}
 		if r.Settings.Details {
 			for _, m := range modules {
 				fmt.Fprintln(&b)
@@ -221,8 +235,8 @@ func renderMessages(w io.Writer, title string, values []string) {
 }
 func renderModule(w io.Writer, r report.Report, m Module, color bool) {
 	state := m.Status
-	if r.Command == m.Command && r.Status == "failed" {
-		state = "failed"
+	if r.Command == m.Command && (r.Status == "failed" || r.Status == "partial") {
+		state = r.Status
 	}
 	title := strings.ToUpper(m.Command)
 	if strings.HasPrefix(title, "RAM ") {
@@ -265,6 +279,22 @@ func renderModule(w io.Writer, r report.Report, m Module, color bool) {
 		fmt.Fprintln(w, "\nDETAILS\n"+separator)
 		fmt.Fprintln(w, statsNote(r.Settings.StabilityCV))
 		for _, t := range m.Tables {
+			table(w, t)
+		}
+		if m.Command == "network test" {
+			for _, direction := range reportNetworkDirections(r) {
+				renderNetworkDirection(w, direction, r.Settings.UDP, r.Settings.Bidir)
+			}
+		}
+		if m.Command == "cpu test" || m.Command == "ram test" {
+			runs, _ := decode[[]json.RawMessage](r.Results[m.Command])
+			t := Table{Title: "Recorded native measurements", Headers: []string{"Run", "Workload", "Value", "Workers", "Dataset bytes", "Seconds", "Integrity errors"}}
+			for i, run := range runs {
+				var native cpu.NativeResult
+				if json.Unmarshal(run, &native) == nil {
+					appendNativeMeasurements(&t, i+1, native)
+				}
+			}
 			table(w, t)
 		}
 		if strings.HasPrefix(m.Command, "cpu ") {

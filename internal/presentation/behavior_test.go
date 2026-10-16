@@ -28,7 +28,7 @@ func TestStealWarningUsesConfiguredScreeningThreshold(t *testing.T) {
 		if strings.Count(s, "check host CPU contention") > 1 {
 			t.Fatal("duplicated steal warning", s)
 		}
-		if !strings.Contains(s, unit(test.value, "%", 2)) {
+		if !strings.Contains(s, percentRange([]float64{test.value})) {
 			t.Fatal("measured steal was hidden", s)
 		}
 	}
@@ -146,6 +146,11 @@ func TestDiskLifecycleDisplaysSizesPreparationAndCleanupFailure(t *testing.T) {
 	r := diskFixture("randread-4k", 3)
 	r.Results["disk_lifecycle"] = disk.Lifecycle{Target: "/test-data", Workspace: "/test-data/.vmbench-fixture", FileBytes: 2 << 30, TotalBytes: 8 << 30, Jobs: 4, PreparationSeconds: 12, Prepared: true, CleanupCompleted: true}
 	text := output(t, r)
+	if !strings.Contains(text, "Temporary Files: Cleaned") || strings.Contains(text, "Preparation (not measured by fio)") || strings.Contains(text, "GiB") {
+		t.Fatal(text)
+	}
+	r.Settings.Details = true
+	text = output(t, r)
 	for _, want := range []string{"/test-data", "2.000 GiB", "8.000 GiB", "Preparation (not measured by fio)", "Temporary file cleanup"} {
 		if !strings.Contains(text, want) {
 			t.Fatal(text)

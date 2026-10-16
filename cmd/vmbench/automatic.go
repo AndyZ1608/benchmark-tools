@@ -138,23 +138,33 @@ type automaticActions struct {
 	disk    func(automatic.Options) (automatic.DiskInfo, error)
 	peer    func(string) error
 	execute func(context.Context, automatic.Options) error
+	details func() error // Renders the retained result without executing a workload.
 }
 
 func realActions(output, progress io.Writer) automaticActions {
+	var last *automatic.Result
 	return automaticActions{
 		disk: func(o automatic.Options) (automatic.DiskInfo, error) {
 			return automatic.CheckDiskTarget(o, automatic.RealBackend{})
 		},
 		peer: automatic.ValidatePeer,
 		execute: func(ctx context.Context, o automatic.Options) error {
+			last = nil
 			if runtime.GOOS != "linux" {
 				return fmt.Errorf("automatic benchmark execution requires Linux")
 			}
-			result, cause := automatic.Run(ctx, o, automatic.RealBackend{}, func(line string) { fmt.Fprintln(progress, presentation.SafeText(line)) })
+			result, cause := automatic.Run(ctx, o, automatic.RealBackend{}, presentation.AutomaticProgress(progress, o.Details))
+			last = &result
 			if err := presentation.RenderAutomatic(output, result, o.Details); err != nil {
 				return err
 			}
 			return cause
+		},
+		details: func() error {
+			if last == nil {
+				return fmt.Errorf("no benchmark result is available")
+			}
+			return presentation.RenderAutomatic(output, *last, true)
 		},
 	}
 }
@@ -200,7 +210,11 @@ func prepareTargets(c *console, o *automatic.Options, a automaticActions, intera
 				o.DiskPath = ""
 				continue
 			}
-			fmt.Fprintf(c.out, "Disk target: %s; filesystem %s; mount %s\n", presentation.SafeText(info.Path), presentation.SafeText(info.Filesystem), presentation.SafeText(info.Mount))
+			if o.Details {
+				fmt.Fprintf(c.out, "Disk target: %s; filesystem %s; mount %s\n", presentation.SafeText(info.Path), presentation.SafeText(info.Filesystem), presentation.SafeText(info.Mount))
+			} else {
+				fmt.Fprintln(c.out, "Disk target: "+presentation.SafeText(info.Path))
+			}
 			if info.System {
 				fmt.Fprintln(c.out, "WARNING: Disk target is on the system filesystem.")
 			}
@@ -333,15 +347,30 @@ func interactiveSession(ctx context.Context, input io.Reader, output io.Writer, 
 			} else {
 				fmt.Fprintln(output, "Benchmark completed.")
 			}
-			next, err := c.choose("\n[1] Back to Main Menu\n[0] Exit\n\nSelect: ", []string{"0", "1"})
-			if finishedInput(err) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if next == "0" {
-				return nil
+			for {
+				prompt := "\n[1] Back to Main Menu\n[0] Exit\n\nSelect: "
+				choices := []string{"0", "1"}
+				if a.details != nil {
+					prompt = "\n[1] Back to Main Menu\n[2] View Details\n[0] Exit\n\nSelect: "
+					choices = append(choices, "2")
+				}
+				next, err := c.choose(prompt, choices)
+				if finishedInput(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				if next == "0" {
+					return nil
+				}
+				if next == "2" {
+					if err := a.details(); err != nil {
+						fmt.Fprintln(output, "Details unavailable: "+presentation.SafeText(err.Error()))
+					}
+					continue
+				}
+				break
 			}
 			break
 		}
@@ -365,6 +394,7 @@ Legacy combined commands: quick | standard | max (missing endpoints are skipped)
   --include-writes --confirm-writes  Separate optional write-test authorization
   --config FILE             Optional flat automatic configuration
   --details                 Show search observations and detected resources
+  --disk-p99-warning-ms N    Optional per-workload P99 warning threshold; 0 disables
   --fio-diagnostics DIRECTORY  Retain raw fio output for failed workloads only
 Safety ceilings:
   --max-workers 32 --max-ram 2GiB --max-disk-data 2GiB --min-free-disk 1GiB
