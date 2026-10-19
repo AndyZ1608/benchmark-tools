@@ -82,7 +82,11 @@ func TestUnifiedDefaultAndDetailsAcrossComponentsAndModes(t *testing.T) {
 				if !strings.Contains(out, "VMBENCH - "+strings.ToUpper(component+" "+mode)) || !strings.Contains(out, "Status: COMPLETED") {
 					t.Fatal(out)
 				}
-				if len(strings.Split(strings.TrimSpace(out), "\n")) > 26 {
+				limit := 26
+				if component == "disk" {
+					limit = 32
+				}
+				if len(strings.Split(strings.TrimSpace(out), "\n")) > limit {
 					t.Fatal("default too verbose", out)
 				}
 				for _, hidden := range []string{"Configuration:", "Dataset:", "Detected resources:", "affinity", "Searched configurations", "Integrity errors:", "N/A"} {

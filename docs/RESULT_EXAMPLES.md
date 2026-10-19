@@ -32,7 +32,7 @@ Memory Latency  : 85.00 ns/access
 ========================================
 ```
 
-A successful Disk MAX read result has two performance sections and four primary metrics:
+Disk shows random-read IOPS and throughput, sequential throughput, per-workload P99 ranges, and independent confidence labels:
 
 ```text
 ========================================
@@ -45,12 +45,15 @@ Target: /data
 RANDOM READ 4K
 ----------------------------------------
 IOPS           : 15,083
+Throughput     : 58.92 MiB/s
 P99 Latency    : 18.5 - 25.6 ms (job/run range)
+Confidence     : CONFIRMED
 
 SEQUENTIAL READ
 ----------------------------------------
 Throughput     : 95.61 MiB/s
 P99 Latency    : 2.02 - 2.84 s (job/run range)
+Confidence     : CONFIRMED
 
 ----------------------------------------
 Temporary Files: Cleaned
@@ -74,4 +77,4 @@ Download Retransmits: 3 - 5 (per-run range)
 ```
 
 
-These fixtures demonstrate presentation only. Real safety and quality warnings appear when warranted. Use `--details` or the post-run View Details option for retained diagnostics; neither view creates a JSON report.
+These fixtures demonstrate presentation only. Real safety and quality warnings appear when warranted. Disk observations remain visible when unconfirmed; see [retention and selection](DISK-RESULTS.md). Use `--details` or View Details for retained diagnostics; neither view creates a JSON report.

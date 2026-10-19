@@ -8,6 +8,7 @@ import (
 )
 
 func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
+	r = diskResultView(r)
 	if !details {
 		return renderAutomaticCompact(w, r)
 	}
@@ -52,6 +53,16 @@ func RenderAutomatic(w io.Writer, r automatic.Result, details bool) error {
 			fmt.Fprintf(&b, "Dataset: %s\n", unit(float64(r.Plan.MemoryBytes)/(1<<20), "MiB", 0))
 		}
 		for _, peak := range m.peaks {
+			if m.name == "DISK" {
+				renderCompactAutomaticDisk(&b, peak)
+				fmt.Fprintln(&b, "Selection: "+SafeText(peak.Selection))
+				if peak.Failure != "" {
+					fmt.Fprintln(&b, "Search failure: "+SafeLines(peak.Failure))
+				}
+				if peak.SearchIncomplete {
+					fmt.Fprintln(&b, "Search: INCOMPLETE")
+				}
+			}
 			name := SafeText(peak.Name)
 			switch name {
 			case "integer-xorshift64":

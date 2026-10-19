@@ -20,7 +20,13 @@ func renderAutomaticCompact(w io.Writer, r automatic.Result) error {
 	case "quick":
 		fmt.Fprintln(&b, "Results: Preliminary")
 	case "max":
-		fmt.Fprintln(&b, "Results: Maximum observed within tested limits")
+		label := "Maximum observed within tested limits"
+		for _, peak := range r.Disk {
+			if r.Limits.Selects("DISK") && !peak.Confirmed {
+				label = "Observed measurements within tested limits"
+			}
+		}
+		fmt.Fprintln(&b, "Results: "+label)
 	}
 	if r.Limits.Selects("DISK") && r.DiskInfo.Path != "" {
 		fmt.Fprintln(&b, "Target: "+SafeText(r.DiskInfo.Path))
@@ -43,30 +49,15 @@ func renderAutomaticCompact(w io.Writer, r automatic.Result) error {
 			}
 		}
 		for _, peak := range module.peaks {
+			if module.name == "DISK" {
+				renderCompactAutomaticDisk(&b, peak)
+				continue
+			}
 			if !visibleAutomaticPeak(peak, r.Mode) {
 				continue
 			}
 			best := peak.Best
-			if module.name == "DISK" {
-				fmt.Fprintf(&b, "\n%s\n%s\n", strings.ToUpper(automaticPeakName(peak.Name)), automaticRule)
-			}
 			switch module.name {
-			case "DISK":
-				label, value := "IOPS", number(best.Stats.Median, 0)
-				if peak.Name == "mixed-70-30" {
-					label = "Total IOPS"
-				}
-				if peak.Unit == "MiB/s" {
-					label, value = "Throughput", unit(best.Stats.Median, "MiB/s", 2)
-				}
-				compactMetric(&b, label, value)
-				if values := automaticP99(*best); len(values) > 0 {
-					context := " (job/run range)"
-					if peak.Name == "mixed-70-30" {
-						context = " (read/write job/run range)"
-					}
-					compactMetric(&b, "P99 Latency", latencyRange(values)+context)
-				}
 			case "CPU":
 				value := unit(best.Stats.Median, SafeText(peak.Unit), 0)
 				if efficiency, _, ok := automaticEfficiency(peak); ok {
@@ -113,15 +104,7 @@ func renderAutomaticCompact(w io.Writer, r automatic.Result) error {
 			}
 			compactMetricWidth(&b, "Stability", state, width)
 		}
-		if module.name == "DISK" && r.Mode == "standard" && len(module.peaks) > 0 {
-			state := "Confirmed"
-			for _, peak := range module.peaks {
-				if !peak.Confirmed {
-					state = "Unconfirmed"
-				}
-			}
-			fmt.Fprintln(&b, "Stability: "+state)
-		}
+
 	}
 
 	if warnings := automaticWarnings(r, false); len(warnings) > 0 {

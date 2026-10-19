@@ -53,7 +53,15 @@ func automaticWarnings(r automatic.Result, details bool) []string {
 					warnings = append(warnings, name+": "+finding)
 				}
 			}
-			if !displayablePeak(peak) {
+			if module.name == "DISK" {
+				if !automatic.UsableDiskTrial(peak.Best) {
+					warnings = append(warnings, name+": No valid measurement; "+peak.Failure)
+				} else if r.Mode != "quick" {
+					if reason := diskConfidenceWarning(peak); reason != "" {
+						warnings = append(warnings, name+": "+reason)
+					}
+				}
+			} else if !displayablePeak(peak) {
 				warnings = append(warnings, name+": Incomplete benchmark; no validated result available")
 			} else if r.Mode != "quick" && !peak.Confirmed {
 				warnings = append(warnings, name+": Unstable or unconfirmed measurements")
@@ -62,6 +70,9 @@ func automaticWarnings(r automatic.Result, details bool) []string {
 				warnings = append(warnings, name+": Search limit reached; higher performance may be possible")
 			}
 			for _, note := range peak.Notes {
+				if module.name == "DISK" && !details && note == "Maximum performance could not be confirmed reliably." {
+					continue
+				}
 				if automaticInformational(note) && !details {
 					continue
 				}

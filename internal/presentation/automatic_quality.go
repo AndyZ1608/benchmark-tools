@@ -12,6 +12,9 @@ import (
 )
 
 func visibleAutomaticPeak(peak automatic.Peak, mode string) bool {
+	if isDiskPeak(peak) {
+		return automatic.UsableDiskTrial(peak.Best)
+	}
 	return displayablePeak(peak) && (mode != "max" || peak.Confirmed) && len(automaticInvalidEvidence(peak)) == 0
 }
 
@@ -86,7 +89,11 @@ func automaticDisplayStatus(r automatic.Result) string {
 				status = "PARTIAL"
 			}
 			if (!displayablePeak(peak) || r.Mode != "quick" && !peak.Confirmed) && status == "COMPLETED" {
-				status = "PARTIAL"
+				if module.name == "DISK" && automatic.UsableDiskTrial(peak.Best) {
+					status = "COMPLETED WITH LIMITATIONS"
+				} else {
+					status = "PARTIAL"
+				}
 			}
 		}
 	}

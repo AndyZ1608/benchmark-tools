@@ -24,14 +24,22 @@ func compactDiskFixture() automatic.Result {
 			Setting:  automatic.Setting{Depth: 4, Jobs: 2},
 			Stats:    statistics.Summary{Count: 3, Median: value, CV: .01},
 			Duration: 5, Stable: true,
-			Samples: []automatic.Sample{{Value: value, MiBps: 95.61,
+			Samples: []automatic.Sample{{Value: value, MiBps: 95.61, DiskValidated: true, Repetition: 1,
 				MeanMS: .1, MeanLowMS: .05, P99LowMS: low, P99HighMS: high,
 				Evidence: "libaio; requested QD4; job 1: bucket 4 99.0%",
 				Raw: disk.Result{Jobs: []disk.Job{{Name: "private-job", Read: disk.Direction{
-					IOPS: value, BWBytes: 95.61 * (1 << 20),
+					IOPS: value, BWBytes: 95.61 * (1 << 20), TotalIOs: 100, IOBytes: 409600,
 					Completion: disk.Latency{Mean: 100000, Percentile: map[string]float64{"95.000000": low * 1e6 / 2, "99.000000": low * 1e6}},
 				}}}},
 			}},
+		}
+		if name == "randread-4k" {
+			trial.Samples[0].MiBps = value / 256
+		}
+		for len(trial.Samples) < trial.Stats.Count {
+			sample := trial.Samples[0]
+			sample.Repetition = len(trial.Samples) + 1
+			trial.Samples = append(trial.Samples, sample)
 		}
 		return automatic.Peak{Name: name, Unit: unit, Best: &trial, Confirmed: true, Trials: []automatic.Trial{trial}}
 	}
@@ -73,12 +81,15 @@ Target: /data
 RANDOM READ 4K
 ----------------------------------------
 IOPS           : 15,083
+Throughput     : 58.92 MiB/s
 P99 Latency    : 18.5 - 25.6 ms (job/run range)
+Confidence     : CONFIRMED
 
 SEQUENTIAL READ
 ----------------------------------------
 Throughput     : 95.61 MiB/s
 P99 Latency    : 2.02 - 2.84 s (job/run range)
+Confidence     : CONFIRMED
 
 ----------------------------------------
 Temporary Files: Cleaned
@@ -130,7 +141,10 @@ func TestLatencyRangeFormatting(t *testing.T) {
 		}
 	}
 	result := compactDiskFixture()
-	result.Disk[0].Best.Samples = append(result.Disk[0].Best.Samples, automatic.Sample{P99LowMS: 12, P99HighMS: 35})
+	sample := result.Disk[0].Best.Samples[0]
+	sample.P99LowMS, sample.P99HighMS = 12, 35
+	result.Disk[0].Best.Samples = append(result.Disk[0].Best.Samples, sample)
+	result.Disk[0].Best.Stats.Count = len(result.Disk[0].Best.Samples)
 	output := renderAutomaticTest(t, result, false)
 	if !strings.Contains(output, "12.0 - 35.0 ms (job/run range)") {
 		t.Fatal(output)
@@ -141,23 +155,19 @@ func TestAutomaticMissingAndUnconfirmedMetrics(t *testing.T) {
 	result := compactDiskFixture()
 	result.Disk[0].Best = nil
 	result.Disk[0].Confirmed = false
-	result.Disk[1].Best.Samples = nil
-	output := renderAutomaticTest(t, result, false)
-	if strings.Contains(output, "IOPS ") || strings.Contains(output, "P99 Latency") || strings.Contains(output, "N/A") {
-		t.Fatal("unavailable metric printed", output)
+	out := renderAutomaticTest(t, result, false)
+	if !strings.Contains(out, "IOPS           : 15,083") || !strings.Contains(out, "Confidence     : UNCONFIRMED") {
+		t.Fatal("usable history was hidden", out)
 	}
-	if !strings.Contains(output, "Incomplete benchmark") {
-		t.Fatal(output)
+	result.Disk[0].Trials = nil
+	result.Disk[0].Failure = "fio validation failed"
+	out = renderAutomaticTest(t, result, false)
+	if !strings.Contains(out, "IOPS           : N/A") || !strings.Contains(out, "NO VALID MEASUREMENT") || !strings.Contains(out, "fio validation failed") {
+		t.Fatal(out)
 	}
-	result.Disk[1].Confirmed = false
-	output = renderAutomaticTest(t, result, false)
-	if strings.Contains(output, "Throughput ") || !strings.Contains(output, "Unstable or unconfirmed") {
-		t.Fatal(output)
-	}
-	result.Disk[1].Confirmed = true
 	result.Disk[1].Best.Stats.Median = math.NaN()
 	if strings.Contains(renderAutomaticTest(t, result, false), "NaN") {
-		t.Fatal("invalid value printed")
+		t.Fatal("invalid statistic printed")
 	}
 }
 
@@ -173,7 +183,7 @@ func TestAutomaticCriticalWarningsAndErrors(t *testing.T) {
 	result.Disk[1].Confirmed = false
 	for _, details := range []bool{false, true} {
 		output := renderAutomaticTest(t, result, details)
-		for _, want := range []string{"system filesystem", "Insufficient free disk space", "Unknown validation warning", "Search limit reached", "Unstable or unconfirmed", "cleanup incomplete", "ERROR: DISK: cleanup failed"} {
+		for _, want := range []string{"system filesystem", "Insufficient free disk space", "Unknown validation warning", "Search limit reached", "Stability not confirmed", "cleanup incomplete", "ERROR: DISK: cleanup failed"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("warning lost: %s\n%s", want, output)
 			}
@@ -219,7 +229,7 @@ func TestAutomaticModesAndModuleScope(t *testing.T) {
 			}
 		}
 		output := renderAutomaticTest(t, result, false)
-		if strings.Contains(output, "Stability") != (mode == "standard") {
+		if !strings.Contains(output, "Confidence") {
 			t.Fatal(output)
 		}
 		if mode == "quick" && !strings.Contains(output, "Results: Preliminary") {

@@ -49,10 +49,21 @@ func renderAutomaticDiskDetails(w io.Writer, trial automatic.Trial) {
 	table.Flush()
 	fmt.Fprintln(w, "Observed depth / validation:")
 	for i, sample := range trial.Samples {
+		fmt.Fprintf(w, "Run %d: original repetition %d; execution/validation PASSED\n", i+1, sample.Repetition)
 		if sample.Evidence != "" {
 			fmt.Fprintf(w, "Run %d depth/validation: %s\n", i+1, SafeText(sample.Evidence))
 		}
 		if raw, ok := decode[disk.Result](sample.Raw); ok {
+			for jobIndex, job := range raw.Jobs {
+				for _, direction := range []struct {
+					name  string
+					value disk.Direction
+				}{{"read", job.Read}, {"write", job.Write}} {
+					if direction.value.IOPS > 0 {
+						fmt.Fprintf(w, "  Job %d %s: %s; %s; runtime %s; completed I/Os %s; completed bytes %s; fio error %d\n", jobIndex+1, direction.name, unit(direction.value.IOPS, "IOPS", 2), unit(direction.value.BWBytes/(1<<20), "MiB/s", 2), unit(direction.value.Runtime/1000, "s", 3), groupedCount(direction.value.TotalIOs), groupedCount(direction.value.IOBytes), job.Error)
+					}
+				}
+			}
 			for _, observation := range raw.Accounting {
 				if observation.ByteDifference != "0" {
 					fmt.Fprintf(w, "Run %d counter validation: %s %s; completed bytes %s; queued I/Os %s; byte difference %s; %s\n", i+1, SafeText(observation.Job), SafeText(observation.Direction), groupedCount(observation.IOBytes), groupedCount(observation.TotalIOs), SafeText(observation.ByteDifference), SafeText(observation.Explanation))
@@ -80,9 +91,23 @@ func appendNativeMeasurements(rows *Table, run int, raw cpu.NativeResult) {
 
 func renderAutomaticTrials(w io.Writer, peak automatic.Peak) {
 	table := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "Configuration\tMeasured throughput\tCV\tRepetitions\tSeconds/run")
+	fmt.Fprintln(table, "Configuration\tMeasured throughput\tCV\tRepetitions\tSeconds/run\tPhase\tCompletion")
 	for _, trial := range peak.Trials {
-		fmt.Fprintf(table, "%s\t%s\t%.1f%%\t%d\t%d\n", trial.Setting.String(), unit(trial.Stats.Median, SafeText(peak.Unit), 2), 100*trial.Stats.CV, trial.Stats.Count, trial.Duration)
+		value, cv := unit(trial.Stats.Median, SafeText(peak.Unit), 2), number(100*trial.Stats.CV, 1)+"%"
+		if len(trial.Samples) == 0 {
+			value, cv = "N/A", "-"
+		}
+		if trial.Stats.Count < 2 {
+			cv = "-"
+		}
+		phase, completion := "exploration", "complete"
+		if trial.Confirmation {
+			phase = "confirmation"
+		}
+		if trial.Failure != "" {
+			completion = "incomplete: " + SafeText(trial.Failure)
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n", trial.Setting.String(), value, cv, trial.Stats.Count, trial.Duration, phase, completion)
 	}
 	table.Flush()
 }

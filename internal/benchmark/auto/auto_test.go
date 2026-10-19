@@ -102,14 +102,38 @@ func (f *fakeBackend) Measure(ctx context.Context, c config.Config) (disk.Outcom
 	if score < 10 {
 		score = 10
 	}
-	r := disk.Result{Options: map[string]string{"ioengine": c.Engine}}
+	rw, bs, block := "randread", "4k", uint64(4096)
+	if strings.Contains(c.Profile, "1m") {
+		rw, bs, block = "read", "1m", 1<<20
+	}
+	if strings.Contains(c.Profile, "write") {
+		rw = "randwrite"
+		if bs == "1m" {
+			rw = "write"
+		}
+	}
+	if c.Profile == "mixed-70-30" {
+		rw = "randrw"
+	}
+	r := disk.Result{Version: "fio-3.36", Options: map[string]string{"ioengine": c.Engine, "rw": rw, "bs": bs, "iodepth": fmt.Sprint(c.Depth), "direct": "1", "time_based": "1", "ramp_time": fmt.Sprint(c.Warmup), "group_reporting": "0"}}
 	for i := 0; i < c.Jobs; i++ {
-		v := disk.Direction{TotalIOs: 100, IOBytes: 409600, IOPS: score / float64(c.Jobs), BWBytes: score * 4096 / float64(c.Jobs), Runtime: float64(c.Duration * 1000), Completion: disk.Latency{Mean: 100000, Percentile: map[string]float64{"99.000000": float64(1000000 + c.Depth*1000)}}}
+		count := uint64(math.Round(score * float64(c.Duration) / float64(c.Jobs)))
+		runtime := float64(c.Duration * 1000)
+		v := disk.Direction{TotalIOs: count, IOBytes: count * block, IOPS: math.Round(float64(count)*1000/runtime*1e6) / 1e6, BWBytes: math.Floor(float64(count*block) * 1000 / runtime), Runtime: runtime, Completion: disk.Latency{Mean: 100000, Percentile: map[string]float64{"99.000000": float64(1000000 + c.Depth*1000)}}}
+
 		bucket := fmt.Sprint(c.Depth)
 		if c.Depth >= 64 {
 			bucket = ">=64"
 		}
-		r.Jobs = append(r.Jobs, disk.Job{Read: v, Write: v, Depth: map[string]float64{bucket: 100}})
+		job := disk.Job{Read: v, Depth: map[string]float64{bucket: 100}}
+		if strings.Contains(c.Profile, "write") {
+			job.Read = disk.Direction{}
+			job.Write = v
+		}
+		if c.Profile == "mixed-70-30" {
+			job.Write = v
+		}
+		r.Jobs = append(r.Jobs, job)
 	}
 	if f.diskAccounting {
 		r.Accounting = []disk.CounterObservation{{Job: "job-001", Direction: "read", IOBytes: 413696, TotalIOs: 100, BlockBytes: 4096, ByteDifference: "+4096", Explanation: "fixture ramp accounting"}}
@@ -512,7 +536,7 @@ func TestDiskEngineFailureDoesNotDisableIndependentModules(t *testing.T) {
 	o.NetworkPeer = "10.0.0.20"
 	f := &fakeBackend{engineFailure: true}
 	r, err := Run(context.Background(), o, f, nil)
-	if err == nil || r.States["DISK"] != "FAILED" || f.opened != 0 || len(r.Disk) != 0 {
+	if err == nil || r.States["DISK"] != "FAILED" || f.opened != 0 || len(r.Disk) != 2 {
 		t.Fatal(r, err)
 	}
 	for _, module := range []string{"CPU", "MEMORY", "NETWORK"} {

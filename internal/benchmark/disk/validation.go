@@ -17,6 +17,20 @@ type CounterObservation struct {
 	IOBytes, TotalIOs, BlockBytes               uint64
 }
 
+// ValidateObservation applies the existing mandatory workload/counter checks
+// at the automatic-controller boundary, including asynchronous depth evidence.
+// It never converts failed execution or incomplete output into an observation.
+func ValidateObservation(r Result, c config.Config) (string, error) {
+	if !c.Direct {
+		return "", fmt.Errorf("automatic Disk observation requires direct I/O")
+	}
+	rw, _, _ := profile(c)
+	if _, err := validateMeasured(r, c, rw, c.Depth, false); err != nil {
+		return "", err
+	}
+	return ExecutionEvidence(r, c.Engine, c.Depth)
+}
+
 func option(r Result, j Job, key string) string {
 	if value, ok := j.Options[key]; ok {
 		return value

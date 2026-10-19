@@ -2,6 +2,7 @@ package auto
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -25,13 +26,17 @@ type Sample struct {
 	Extras                                                          map[string]float64
 	Evidence                                                        string
 	Raw                                                             any
+	Repetition                                                      int
+	DiskValidated                                                   bool // Set only after successful fio execution and mandatory validation.
 }
 type Trial struct {
-	Setting  Setting
-	Stats    statistics.Summary
-	Samples  []Sample
-	Duration int
-	Stable   bool
+	Setting      Setting
+	Stats        statistics.Summary
+	Samples      []Sample
+	Duration     int
+	Stable       bool
+	Failure      string // A later repetition failed; Samples contains only earlier valid observations.
+	Confirmation bool
 }
 type Peak struct {
 	Name, Unit          string
@@ -39,13 +44,28 @@ type Peak struct {
 	Trials              []Trial
 	Confirmed, Boundary bool
 	Notes               []string
+	Failure, Selection  string
+	SearchIncomplete    bool
 }
 type measure func(context.Context, Setting, int, int) (Sample, error)
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
-func evaluate(ctx context.Context, s Setting, seconds, reps, warm int, cv float64, fn measure) (Trial, error) {
-	t := Trial{Setting: s, Duration: seconds}
+func evaluate(ctx context.Context, s Setting, seconds, reps, warm int, cv float64, fn measure) (t Trial, err error) {
+	t = Trial{Setting: s, Duration: seconds}
 	values := []float64{}
+	defer func() {
+		if len(values) > 0 {
+			var summaryError error
+			t.Stats, summaryError = statistics.Describe(values)
+			if summaryError != nil {
+				err = errors.Join(err, summaryError)
+			}
+			t.Stable = err == nil && t.Stats.Count >= 3 && t.Stats.CV <= cv
+		}
+		if err != nil {
+			t.Failure = err.Error()
+		}
+	}()
 	for i := 0; i < reps; i++ {
 		if e := ctx.Err(); e != nil {
 			return t, e
@@ -62,22 +82,24 @@ func evaluate(ctx context.Context, s Setting, seconds, reps, warm int, cv float6
 				return t, fmt.Errorf("invalid secondary metric for %s", s)
 			}
 		}
+		v.Repetition = i + 1
 		t.Samples = append(t.Samples, v)
 		values = append(values, v.Value)
 	}
-	var e error
-	t.Stats, e = statistics.Describe(values)
-	t.Stable = e == nil && t.Stats.Count >= 3 && t.Stats.CV <= cv
-	return t, e
+	if len(values) == 0 {
+		return t, fmt.Errorf("no performance observations")
+	}
+	return t, nil
 }
 
 type explorer struct {
-	peak     Peak
-	options  Options
-	policy   Policy
-	fn       measure
-	progress func(string)
-	seen     map[Setting]bool
+	peak          Peak
+	options       Options
+	policy        Policy
+	fn            measure
+	progress      func(string)
+	seen          map[Setting]bool
+	retainPartial bool // Disk retains valid earlier repetitions on a later error.
 }
 
 func newExplorer(name, unit string, o Options, fn measure, progress func(string)) *explorer {
@@ -110,6 +132,9 @@ func (e *explorer) survey(ctx context.Context, settings []Setting, adaptive bool
 		e.seen[s] = true
 		t, err := evaluate(ctx, s, e.policy.ExploreSeconds, e.policy.ExploreReps, e.policy.Warmup, e.options.MaxCV, e.fn)
 		if err != nil {
+			if e.retainPartial {
+				e.peak.Trials = append(e.peak.Trials, t)
+			}
 			return err
 		}
 		e.peak.Trials = append(e.peak.Trials, t)
@@ -169,7 +194,11 @@ func (e *explorer) finish(ctx context.Context, boundary func(Setting) bool) (Pea
 		}
 		seen[candidate.Setting] = true
 		t, err := evaluate(ctx, candidate.Setting, e.policy.ConfirmSeconds, e.policy.ConfirmReps, e.policy.Warmup, e.options.MaxCV, e.fn)
+		t.Confirmation = true
 		if err != nil {
+			if e.retainPartial {
+				e.peak.Trials = append(e.peak.Trials, t)
+			}
 			return e.peak, err
 		}
 		e.peak.Trials = append(e.peak.Trials, t)

@@ -116,9 +116,11 @@ func Run(ctx context.Context, o Options, b Backend, progress func(string)) (out 
 			observations = out.Network
 		}
 		for _, peak := range observations {
-			if peak.Best == nil {
+			if peak.Best == nil || module == "DISK" && o.Mode != "quick" && !peak.Confirmed {
 				out.States[module] = "UNCONFIRMED"
-				out.Warnings = append(out.Warnings, module+": Maximum performance could not be confirmed reliably.")
+				if module != "DISK" {
+					out.Warnings = append(out.Warnings, module+": Maximum performance could not be confirmed reliably.")
+				}
 				if out.Status == "COMPLETED" {
 					out.Status = "COMPLETED WITH LIMITATIONS"
 				}
@@ -293,6 +295,25 @@ func CheckDiskTarget(o Options, b Backend) (DiskInfo, error) {
 	return info, err
 }
 func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Backend, progress func(string)) (peaks []Peak, info DiskInfo, total uint64, cleaned bool, err error) {
+	profiles := []string{"randread-4k", "seqread-1m"}
+	if o.IncludeWrites {
+		profiles = append(profiles, "randwrite-4k", "seqwrite-1m", "mixed-70-30")
+	}
+	for _, profile := range profiles {
+		unitName := "IOPS"
+		if strings.Contains(profile, "1m") {
+			unitName = "MiB/s"
+		}
+		peaks = append(peaks, Peak{Name: profile, Unit: unitName, SearchIncomplete: true})
+	}
+	defer func() {
+		for i := range peaks {
+			if peaks[i].SearchIncomplete && peaks[i].Failure == "" && err != nil {
+				peaks[i].Failure = "Not run: " + err.Error()
+			}
+		}
+	}()
+
 	info, err = b.Filesystem(o.DiskPath)
 	if err != nil {
 		return
@@ -357,15 +378,8 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 			progress("[OK] Temporary files removed")
 		}
 	}()
-	profiles := []string{"randread-4k", "seqread-1m"}
-	if o.IncludeWrites {
-		profiles = append(profiles, "randwrite-4k", "seqwrite-1m", "mixed-70-30")
-	}
-	for _, profile := range profiles {
-		unit := "IOPS"
-		if strings.Contains(profile, "1m") {
-			unit = "MiB/s"
-		}
+	for index, profile := range profiles {
+		unit := peaks[index].Unit
 		fn := func(ctx context.Context, s Setting, seconds, warm int) (Sample, error) {
 			current := c
 			current.Profile = profile
@@ -381,7 +395,7 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 				return Sample{}, fmt.Errorf("expected one fio measurement")
 			}
 			r := outcome.Results[0]
-			evidence, e := disk.ExecutionEvidence(r, engine, s.Depth)
+			evidence, e := disk.ValidateObservation(r, current)
 			if e != nil {
 				return Sample{}, e
 			}
@@ -392,7 +406,7 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 					}
 				}
 			}
-			sample := Sample{Raw: r, Evidence: evidence, P99LowMS: math.Inf(1), MeanLowMS: math.Inf(1), Extras: map[string]float64{}}
+			sample := Sample{Raw: compactDiskObservation(r), Evidence: evidence, P99LowMS: math.Inf(1), MeanLowMS: math.Inf(1), Extras: map[string]float64{}}
 			for _, job := range r.Jobs {
 				directions := []disk.Direction{job.Read}
 				if strings.Contains(profile, "write") {
@@ -432,60 +446,81 @@ func runDisk(ctx context.Context, o Options, p Plan, resources system.Info, b Ba
 			if unit == "MiB/s" {
 				sample.Value = sample.MiBps
 			}
+			sample.DiskValidated = true
 			return sample, nil
 		}
-		ex := newExplorer(profile, unit, o, fn, progress)
-		depthLimit := min(o.MaxDepth, o.MaxOutstanding)
-		depths := concurrency(depthLimit)
-		if o.Mode == "quick" {
-			depths = []int{min(8, depthLimit)}
+		peak, e := searchDisk(ctx, o, jobs, profile, unit, fn, progress)
+		if total < uint64(max(int64(0), resources.AvailableMemory)) {
+			peak.Notes = append(peak.Notes, "Dataset is smaller than available RAM; backend/cache effects remain possible despite direct I/O")
 		}
-		if o.Mode == "standard" {
-			depths = []int{1, min(8, depthLimit), min(32, depthLimit)}
-		}
-		initial := []Setting{}
-		for _, depth := range depths {
-			initial = append(initial, Setting{Depth: depth, Jobs: 1})
-		}
-		// Complete the bounded Disk depth sweep before confirming a MAX result.
-		if err = ex.survey(ctx, initial, false); err != nil {
-			return
-		}
-		if o.Mode == "max" {
-			if best := ex.promising(); best != nil {
-				additional := []Setting{}
-				for _, n := range concurrency(jobs) {
-					additional = append(additional, Setting{Depth: min(best.Setting.Depth, o.MaxOutstanding/n), Jobs: n})
-				}
-				if err = ex.survey(ctx, additional, true); err != nil {
-					return
-				}
-				best = ex.promising()
-				refined := []Setting{}
-				for _, depth := range []int{max(1, best.Setting.Depth/2), min(depthLimit, best.Setting.Depth*2)} {
-					if depth*best.Setting.Jobs <= o.MaxOutstanding {
-						refined = append(refined, Setting{Depth: depth, Jobs: best.Setting.Jobs})
-					}
-				}
-				if err = ex.survey(ctx, refined, false); err != nil {
-					return
-				}
-			}
-		}
-		peak, e := ex.finish(ctx, func(s Setting) bool {
-			return s.Depth == depthLimit || s.Jobs == jobs || s.Depth*s.Jobs >= o.MaxOutstanding
-		})
+		peaks[index] = peak
 		if e != nil {
 			err = e
 			return
 		}
-		if total < uint64(max(int64(0), resources.AvailableMemory)) {
-			peak.Notes = append(peak.Notes, "Dataset is smaller than available RAM; backend/cache effects remain possible despite direct I/O")
-		}
-		peaks = append(peaks, peak)
 	}
 	return
 }
+
+func searchDisk(ctx context.Context, o Options, jobs int, profile, unit string, fn measure, progress func(string)) (peak Peak, err error) {
+	ex := newExplorer(profile, unit, o, fn, progress)
+	ex.retainPartial = true
+	depthLimit := min(o.MaxDepth, o.MaxOutstanding)
+	boundary := func(s Setting) bool {
+		return s.Depth == depthLimit || s.Jobs == jobs || s.Depth*s.Jobs >= o.MaxOutstanding
+	}
+	defer func() {
+		peak = ex.peak
+		if err != nil {
+			peak.Failure = err.Error()
+			peak.SearchIncomplete = true
+		}
+		selectDiskObservation(&peak)
+		if peak.Best != nil && o.Mode != "quick" {
+			peak.Boundary = boundary(peak.Best.Setting)
+		}
+	}()
+
+	depths := concurrency(depthLimit)
+	if o.Mode == "quick" {
+		depths = []int{min(8, depthLimit)}
+	}
+	if o.Mode == "standard" {
+		depths = []int{1, min(8, depthLimit), min(32, depthLimit)}
+	}
+	initial := []Setting{}
+	for _, depth := range depths {
+		initial = append(initial, Setting{Depth: depth, Jobs: 1})
+	}
+	// Complete the bounded Disk depth sweep before confirming a MAX result.
+	if err = ex.survey(ctx, initial, false); err != nil {
+		return
+	}
+	if o.Mode == "max" {
+		if best := ex.promising(); best != nil {
+			additional := []Setting{}
+			for _, n := range concurrency(jobs) {
+				additional = append(additional, Setting{Depth: min(best.Setting.Depth, o.MaxOutstanding/n), Jobs: n})
+			}
+			if err = ex.survey(ctx, additional, true); err != nil {
+				return
+			}
+			best = ex.promising()
+			refined := []Setting{}
+			for _, depth := range []int{max(1, best.Setting.Depth/2), min(depthLimit, best.Setting.Depth*2)} {
+				if depth*best.Setting.Jobs <= o.MaxOutstanding {
+					refined = append(refined, Setting{Depth: depth, Jobs: best.Setting.Jobs})
+				}
+			}
+			if err = ex.survey(ctx, refined, false); err != nil {
+				return
+			}
+		}
+	}
+	_, err = ex.finish(ctx, boundary)
+	return
+}
+
 func runNetwork(ctx context.Context, o Options, b Backend, progress func(string)) ([]Peak, error) {
 	directions := []bool{false}
 	if o.Mode != "quick" {

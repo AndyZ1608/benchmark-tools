@@ -205,7 +205,7 @@ Memory Latency  : 85.00 ns/access
 ========================================
 ```
 
-A successful Disk MAX read result has two performance sections and four primary metrics:
+Disk shows random-read IOPS and throughput, sequential throughput, per-workload P99 ranges, and independent confidence labels:
 
 ```text
 ========================================
@@ -218,12 +218,15 @@ Target: /data
 RANDOM READ 4K
 ----------------------------------------
 IOPS           : 15,083
+Throughput     : 58.92 MiB/s
 P99 Latency    : 18.5 - 25.6 ms (job/run range)
+Confidence     : CONFIRMED
 
 SEQUENTIAL READ
 ----------------------------------------
 Throughput     : 95.61 MiB/s
 P99 Latency    : 2.02 - 2.84 s (job/run range)
+Confidence     : CONFIRMED
 
 ----------------------------------------
 Temporary Files: Cleaned
@@ -246,7 +249,9 @@ Download Retransmits: 3 - 5 (per-run range)
 ========================================
 ```
 
-P99 values are separate job/run endpoints, never averaged percentiles. QUICK results are preliminary; STANDARD includes a concise stability indicator; MAX displays validated observations within the tested limits. Missing metrics are omitted, and incomplete or unconfirmed results remain visible. CPU shows integer/FP throughput, measured multi-thread efficiency and stability; RAM shows bandwidth and latency, with integrity errors reported as warnings; Network shows tested TCP upload/download throughput and retransmits when recorded. Unmeasured network loss, jitter and RTT are omitted.
+P99 values are separate job/run endpoints, never averaged percentiles. IOPS, bandwidth and latency always come from the same selected workload/configuration and compatible samples. QUICK results are preliminary; STANDARD includes a concise stability indicator; Disk MAX first selects the highest stability-confirmed result under the existing search policy. If none confirms, valid measured results remain visible as `Confidence: UNCONFIRMED`, with the reason for insufficient confidence. A failed later step or cleanup still produces a failure and a nonzero exit code while preserving earlier valid measurements. Disk workloads without any valid sample show `N/A`, `Confidence: NO VALID MEASUREMENT`, and the actual failure reason; other components continue to omit unavailable metrics. CPU shows integer/FP throughput, measured multi-thread efficiency and stability; RAM shows bandwidth and latency, with integrity errors reported as warnings; Network shows tested TCP upload/download throughput and retransmits when recorded. Unmeasured network loss, jitter and RTT are omitted.
+
+The [Disk retention and selection policy](docs/DISK-RESULTS.md) defines confirmed medians, unconfirmed observed medians, explicitly labeled single observations, and no-valid-data behavior. No extra fallback workload or automatic retry is added. Details retain the search failure, original repetition, completed-I/O evidence and selection rationale.
 
 Use the same `--details` option for each component to inspect configuration, dataset, native measurements, engine, queue depth/jobs, search trials, latency distributions, CV/repetitions and ceilings:
 
